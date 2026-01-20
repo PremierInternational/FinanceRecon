@@ -35,6 +35,7 @@ class ReconApp:
         self.base_font = self._resolve_font_family()
         self._configure_styles()
 
+        self._build_scroll_container()
         self._build_header()
         self._build_file_picker()
         self._build_column_selectors()
@@ -42,9 +43,36 @@ class ReconApp:
         self._build_run_section()
 
     # ----------------------------- UI building ----------------------------- #
+    def _build_scroll_container(self) -> None:
+        container = tk.Frame(self.root, background=self.brand_colors["cool_gray"])
+        container.pack(fill="both", expand=True)
+
+        self.canvas = tk.Canvas(
+            container,
+            background=self.brand_colors["cool_gray"],
+            highlightthickness=0,
+        )
+        scrollbar = ttk.Scrollbar(container, orient="vertical", command=self.canvas.yview)
+        self.canvas.configure(yscrollcommand=scrollbar.set)
+
+        scrollbar.pack(side="right", fill="y")
+        self.canvas.pack(side="left", fill="both", expand=True)
+
+        self.scroll_frame = tk.Frame(self.canvas, background=self.brand_colors["cool_gray"])
+        self.scroll_window = self.canvas.create_window((0, 0), window=self.scroll_frame, anchor="nw")
+
+        self.scroll_frame.bind("<Configure>", self._on_scroll_frame_configure)
+        self.canvas.bind("<Configure>", self._on_canvas_configure)
+
+    def _on_scroll_frame_configure(self, _: tk.Event) -> None:
+        self.canvas.configure(scrollregion=self.canvas.bbox("all"))
+
+    def _on_canvas_configure(self, event: tk.Event) -> None:
+        self.canvas.itemconfigure(self.scroll_window, width=event.width)
+
     def _build_header(self) -> None:
         header_frame = tk.Frame(
-            self.root,
+            self.scroll_frame,
             background=self.brand_colors["primary_blue"],
             padx=18,
             pady=14,
@@ -69,7 +97,7 @@ class ReconApp:
         subtitle.pack(anchor="w", pady=(2, 0))
 
     def _build_file_picker(self) -> None:
-        file_frame = ttk.LabelFrame(self.root, text="1) Pick files", padding=10, style="Card.TLabelframe")
+        file_frame = ttk.LabelFrame(self.scroll_frame, text="1) Pick files", padding=10, style="Card.TLabelframe")
         file_frame.pack(fill="x", padx=10, pady=10)
 
         ttk.Button(file_frame, text="Select first file", command=lambda: self._select_file("legacy"), style="Primary.TButton").grid(
@@ -100,7 +128,7 @@ class ReconApp:
         file_frame.columnconfigure(1, weight=1)
 
     def _build_column_selectors(self) -> None:
-        columns_frame = ttk.LabelFrame(self.root, text="2) Choose columns", padding=10, style="Card.TLabelframe")
+        columns_frame = ttk.LabelFrame(self.scroll_frame, text="2) Choose columns", padding=10, style="Card.TLabelframe")
         columns_frame.pack(fill="x", padx=10, pady=10)
 
         ttk.Label(columns_frame, text="Match keys (first file)", style="Card.TLabel").grid(row=0, column=0, sticky="w")
@@ -124,7 +152,7 @@ class ReconApp:
         self._style_listboxes()
 
     def _build_options(self) -> None:
-        options_frame = ttk.LabelFrame(self.root, text="3) Options", padding=10, style="Card.TLabelframe")
+        options_frame = ttk.LabelFrame(self.scroll_frame, text="3) Options", padding=10, style="Card.TLabelframe")
         options_frame.pack(fill="x", padx=10, pady=10)
 
         self.distinct_var = tk.BooleanVar(value=True)
@@ -150,7 +178,7 @@ class ReconApp:
         options_frame.columnconfigure(1, weight=1)
 
     def _build_run_section(self) -> None:
-        run_frame = ttk.LabelFrame(self.root, text="4) Run", padding=10, style="Card.TLabelframe")
+        run_frame = ttk.LabelFrame(self.scroll_frame, text="4) Run", padding=10, style="Card.TLabelframe")
         run_frame.pack(fill="both", expand=True, padx=10, pady=10)
 
         self.run_button = ttk.Button(run_frame, text="Run comparison", command=self._run_comparison, style="Primary.TButton")
