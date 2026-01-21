@@ -18,7 +18,7 @@ class ReconApp:
 
     def __init__(self, root: tk.Tk) -> None:
         self.root = root
-        self.root.title("GL Reconciliation")
+        self.root.title("Reconciliation")
         self.root.geometry("700x650")
         self.root.configure(bg="#D8D7EE")
 
@@ -82,7 +82,7 @@ class ReconApp:
 
         title = tk.Label(
             header_frame,
-            text="GL Reconciliation",
+            text="Reconciliation",
             background=self.brand_colors["primary_blue"],
             foreground=self.brand_colors["white"],
             font=(self.base_font, 18, "bold"),
@@ -438,6 +438,8 @@ def compare_data(
     comparison_key = _unique_key_name()
     legacy = legacy.copy()
     converted = converted.copy()
+    legacy_columns = set(legacy.columns)
+    converted_columns = set(converted.columns)
     legacy[comparison_key] = _build_comparison_key(legacy, pk_legacy)
     converted[comparison_key] = _build_comparison_key(converted, pk_converted)
 
@@ -462,9 +464,18 @@ def compare_data(
     )
     merged_df.rename(columns={comparison_key: "Comparison Key"}, inplace=True)
 
+    legacy_value_column = (
+        f"{match_col_legacy}_legacy" if f"{match_col_legacy}_legacy" in merged_df.columns else match_col_legacy
+    )
+    converted_value_column = (
+        f"{match_col_converted}_converted"
+        if f"{match_col_converted}_converted" in merged_df.columns
+        else match_col_converted
+    )
+
     def _difference(row: pd.Series) -> bool:
-        legacy_val = row.get(f"{match_col_legacy}_legacy")
-        conv_val = row.get(f"{match_col_converted}_converted")
+        legacy_val = row.get(legacy_value_column)
+        conv_val = row.get(converted_value_column)
         if pd.isna(legacy_val) or pd.isna(conv_val):
             return True
         if tolerance_type == "Dollar ($)":
@@ -480,23 +491,54 @@ def compare_data(
     merged_df["Difference"] = merged_df.apply(_difference, axis=1)
     merged_df["Dollar Difference"] = merged_df.apply(
         lambda row: (
-            (0 if pd.isna(row.get(f"{match_col_legacy}_legacy")) else row.get(f"{match_col_legacy}_legacy"))
-            - (0 if pd.isna(row.get(f"{match_col_converted}_converted")) else row.get(f"{match_col_converted}_converted"))
+            (0 if pd.isna(row.get(legacy_value_column)) else row.get(legacy_value_column))
+            - (0 if pd.isna(row.get(converted_value_column)) else row.get(converted_value_column))
         ),
         axis=1,
     )
     merged_df["Percentage Difference"] = merged_df.apply(
         lambda row: (
             float("nan")
-            if pd.isna(row.get(f"{match_col_legacy}_legacy")) or pd.isna(row.get(f"{match_col_converted}_converted"))
+            if pd.isna(row.get(legacy_value_column)) or pd.isna(row.get(converted_value_column))
             else (
-                abs(row.get(f"{match_col_legacy}_legacy") - row.get(f"{match_col_converted}_converted"))
-                / abs(row.get(f"{match_col_legacy}_legacy"))
-                if row.get(f"{match_col_legacy}_legacy") != 0 else float("nan")
+                abs(row.get(legacy_value_column) - row.get(converted_value_column))
+                / abs(row.get(legacy_value_column))
+                if row.get(legacy_value_column) != 0 else float("nan")
             )
         ),
         axis=1,
     )
+
+    def _should_drop_match_column(column_name: str) -> bool:
+        if column_name in pk_legacy or column_name in pk_converted:
+            return True
+        if column_name.endswith("_legacy") and column_name[: -len("_legacy")] in pk_legacy:
+            return True
+        if column_name.endswith("_converted") and column_name[: -len("_converted")] in pk_converted:
+            return True
+        return False
+
+    drop_columns = [col for col in merged_df.columns if _should_drop_match_column(col)]
+    if drop_columns:
+        merged_df.drop(columns=drop_columns, inplace=True)
+
+    rename_columns: dict[str, str] = {}
+    for column in merged_df.columns:
+        if column in {"Comparison Key", "Difference", "Dollar Difference", "Percentage Difference"}:
+            continue
+        if column.endswith("_legacy"):
+            base = column[: -len("_legacy")]
+            rename_columns[column] = f"{base} (First)"
+        elif column.endswith("_converted"):
+            base = column[: -len("_converted")]
+            rename_columns[column] = f"{base} (Second)"
+        elif column in legacy_columns and column not in converted_columns:
+            rename_columns[column] = f"{column} (First)"
+        elif column in converted_columns and column not in legacy_columns:
+            rename_columns[column] = f"{column} (Second)"
+
+    if rename_columns:
+        merged_df.rename(columns=rename_columns, inplace=True)
 
     total_records = len(merged_df)
     matched_records = len(merged_df[~merged_df["Difference"]])
