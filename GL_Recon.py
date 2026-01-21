@@ -9,6 +9,7 @@ import os
 import tkinter as tk
 from tkinter import filedialog, font, messagebox, ttk
 
+from openpyxl import load_workbook
 import pandas as pd
 
 
@@ -421,18 +422,45 @@ def compare_data(
 ) -> ComparisonResult:
     """Compare two dataframes and return a summary."""
 
+    def _unique_key_name() -> str:
+        base = "_comparison_key"
+        key_name = base
+        counter = 1
+        while key_name in legacy.columns or key_name in converted.columns:
+            key_name = f"{base}_{counter}"
+            counter += 1
+        return key_name
+
+    def _build_comparison_key(data: pd.DataFrame, columns: list[str]) -> pd.Series:
+        parts = data[columns].fillna("").astype(str)
+        return parts.apply(lambda row: " | ".join(value.strip() for value in row), axis=1)
+
+    comparison_key = _unique_key_name()
+    legacy = legacy.copy()
+    converted = converted.copy()
+    legacy[comparison_key] = _build_comparison_key(legacy, pk_legacy)
+    converted[comparison_key] = _build_comparison_key(converted, pk_converted)
+
     if distinct_list:
-        legacy = legacy.groupby(pk_legacy)[match_col_legacy].sum().reset_index()
-        converted = converted.groupby(pk_converted)[match_col_converted].sum().reset_index()
+        legacy = (
+            legacy.groupby(comparison_key, dropna=False)
+            .agg({match_col_legacy: "sum", **{col: "first" for col in pk_legacy}})
+            .reset_index()
+        )
+        converted = (
+            converted.groupby(comparison_key, dropna=False)
+            .agg({match_col_converted: "sum", **{col: "first" for col in pk_converted}})
+            .reset_index()
+        )
 
     merged_df = pd.merge(
         legacy,
         converted,
-        left_on=pk_legacy,
-        right_on=pk_converted,
+        on=comparison_key,
         suffixes=("_legacy", "_converted"),
         how="outer",
     )
+    merged_df.rename(columns={comparison_key: "Comparison Key"}, inplace=True)
 
     def _difference(row: pd.Series) -> bool:
         legacy_val = row.get(f"{match_col_legacy}_legacy")
@@ -451,13 +479,21 @@ def compare_data(
 
     merged_df["Difference"] = merged_df.apply(_difference, axis=1)
     merged_df["Dollar Difference"] = merged_df.apply(
-        lambda row: row.get(f"{match_col_legacy}_legacy") - row.get(f"{match_col_converted}_converted"), axis=1
+        lambda row: (
+            (0 if pd.isna(row.get(f"{match_col_legacy}_legacy")) else row.get(f"{match_col_legacy}_legacy"))
+            - (0 if pd.isna(row.get(f"{match_col_converted}_converted")) else row.get(f"{match_col_converted}_converted"))
+        ),
+        axis=1,
     )
     merged_df["Percentage Difference"] = merged_df.apply(
         lambda row: (
-            abs(row.get(f"{match_col_legacy}_legacy") - row.get(f"{match_col_converted}_converted"))
-            / abs(row.get(f"{match_col_legacy}_legacy")) * 100
-            if row.get(f"{match_col_legacy}_legacy") not in [None, 0] else None
+            float("nan")
+            if pd.isna(row.get(f"{match_col_legacy}_legacy")) or pd.isna(row.get(f"{match_col_converted}_converted"))
+            else (
+                abs(row.get(f"{match_col_legacy}_legacy") - row.get(f"{match_col_converted}_converted"))
+                / abs(row.get(f"{match_col_legacy}_legacy"))
+                if row.get(f"{match_col_legacy}_legacy") != 0 else float("nan")
+            )
         ),
         axis=1,
     )
@@ -472,8 +508,27 @@ def compare_data(
     ]
 
     merged_df.to_excel(output_file, index=False)
+    _format_output(output_file, merged_df)
 
     return ComparisonResult(merged_df, "\n".join(summary_lines))
+
+
+def _format_output(output_file: str, merged_df: pd.DataFrame) -> None:
+    workbook = load_workbook(output_file)
+    worksheet = workbook.active
+    header_map = {header: idx + 1 for idx, header in enumerate(merged_df.columns)}
+    dollar_column = header_map.get("Dollar Difference")
+    percent_column = header_map.get("Percentage Difference")
+
+    if dollar_column:
+        for row_idx in range(2, worksheet.max_row + 1):
+            worksheet.cell(row=row_idx, column=dollar_column).number_format = "$#,##0.00"
+
+    if percent_column:
+        for row_idx in range(2, worksheet.max_row + 1):
+            worksheet.cell(row=row_idx, column=percent_column).number_format = "0.00%"
+
+    workbook.save(output_file)
 
 
 # ----------------------------- Entry point ----------------------------- #
