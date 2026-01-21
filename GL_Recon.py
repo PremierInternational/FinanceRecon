@@ -2,12 +2,12 @@
 
 This module lets users pick the input files first and then configure
 comparison options via dropdowns and list selectors. The resulting
-comparison is written to ``Output.xlsx`` in the working directory.
+comparison is written to the selected output file.
 """
 
 import os
 import tkinter as tk
-from tkinter import filedialog, messagebox, ttk
+from tkinter import filedialog, font, messagebox, ttk
 
 import pandas as pd
 
@@ -19,69 +19,157 @@ class ReconApp:
         self.root = root
         self.root.title("GL Reconciliation")
         self.root.geometry("700x650")
+        self.root.configure(bg="#D8D7EE")
 
         self.file_paths = {"legacy": None, "converted": None, "third": None}
         self.dataframes: dict[str, pd.DataFrame | None] = {"legacy": None, "converted": None, "third": None}
+        self.output_path = tk.StringVar(value="Output.xlsx")
 
+        self.brand_colors = {
+            "primary_blue": "#001A72",
+            "primary_green": "#00B388",
+            "midnight": "#1B2A41",
+            "cool_gray": "#D8D7EE",
+            "white": "#FFFFFF",
+        }
+        self.base_font = self._resolve_font_family()
+        self._configure_styles()
+
+        self._build_scroll_container()
+        self._build_header()
         self._build_file_picker()
         self._build_column_selectors()
         self._build_options()
         self._build_run_section()
 
     # ----------------------------- UI building ----------------------------- #
+    def _build_scroll_container(self) -> None:
+        container = tk.Frame(self.root, background=self.brand_colors["cool_gray"])
+        container.pack(fill="both", expand=True)
+
+        self.canvas = tk.Canvas(
+            container,
+            background=self.brand_colors["cool_gray"],
+            highlightthickness=0,
+        )
+        scrollbar = ttk.Scrollbar(container, orient="vertical", command=self.canvas.yview)
+        self.canvas.configure(yscrollcommand=scrollbar.set)
+
+        scrollbar.pack(side="right", fill="y")
+        self.canvas.pack(side="left", fill="both", expand=True)
+
+        self.scroll_frame = tk.Frame(self.canvas, background=self.brand_colors["cool_gray"])
+        self.scroll_window = self.canvas.create_window((0, 0), window=self.scroll_frame, anchor="nw")
+
+        self.scroll_frame.bind("<Configure>", self._on_scroll_frame_configure)
+        self.canvas.bind("<Configure>", self._on_canvas_configure)
+
+    def _on_scroll_frame_configure(self, _: tk.Event) -> None:
+        self.canvas.configure(scrollregion=self.canvas.bbox("all"))
+
+    def _on_canvas_configure(self, event: tk.Event) -> None:
+        self.canvas.itemconfigure(self.scroll_window, width=event.width)
+
+    def _build_header(self) -> None:
+        header_frame = tk.Frame(
+            self.scroll_frame,
+            background=self.brand_colors["primary_blue"],
+            padx=18,
+            pady=14,
+        )
+        header_frame.pack(fill="x")
+
+        title = tk.Label(
+            header_frame,
+            text="GL Reconciliation",
+            background=self.brand_colors["primary_blue"],
+            foreground=self.brand_colors["white"],
+            font=(self.base_font, 18, "bold"),
+        )
+        title.pack(anchor="w")
+        subtitle = tk.Label(
+            header_frame,
+            text="Compare files with branded tolerance controls",
+            background=self.brand_colors["primary_blue"],
+            foreground=self.brand_colors["white"],
+            font=(self.base_font, 11),
+        )
+        subtitle.pack(anchor="w", pady=(2, 0))
+
     def _build_file_picker(self) -> None:
-        file_frame = ttk.LabelFrame(self.root, text="1) Pick files", padding=10)
+        file_frame = ttk.LabelFrame(self.scroll_frame, text="1) Pick files", padding=10, style="Card.TLabelframe")
         file_frame.pack(fill="x", padx=10, pady=10)
 
-        ttk.Button(file_frame, text="Select first file", command=lambda: self._select_file("legacy")).grid(row=0, column=0, padx=5, pady=5, sticky="w")
-        self.legacy_label = ttk.Label(file_frame, text="No file selected", width=70)
-        self.legacy_label.grid(row=0, column=1, padx=5, pady=5)
+        ttk.Button(file_frame, text="Select first file", command=lambda: self._select_file("legacy"), style="Primary.TButton").grid(
+            row=0, column=0, padx=5, pady=5, sticky="w"
+        )
+        self.legacy_label = ttk.Label(file_frame, text="No file selected", width=70, style="Card.TLabel")
+        self.legacy_label.grid(row=0, column=1, padx=5, pady=5, sticky="w")
 
-        ttk.Button(file_frame, text="Select second file", command=lambda: self._select_file("converted")).grid(row=1, column=0, padx=5, pady=5, sticky="w")
-        self.converted_label = ttk.Label(file_frame, text="No file selected", width=70)
-        self.converted_label.grid(row=1, column=1, padx=5, pady=5)
+        ttk.Button(file_frame, text="Select second file", command=lambda: self._select_file("converted"), style="Primary.TButton").grid(
+            row=1, column=0, padx=5, pady=5, sticky="w"
+        )
+        self.converted_label = ttk.Label(file_frame, text="No file selected", width=70, style="Card.TLabel")
+        self.converted_label.grid(row=1, column=1, padx=5, pady=5, sticky="w")
 
-        ttk.Button(file_frame, text="Select optional third file", command=lambda: self._select_file("third")).grid(row=2, column=0, padx=5, pady=5, sticky="w")
-        self.third_label = ttk.Label(file_frame, text="No file selected (optional)", width=70)
-        self.third_label.grid(row=2, column=1, padx=5, pady=5)
+        ttk.Button(file_frame, text="Select optional third file", command=lambda: self._select_file("third"), style="Primary.TButton").grid(
+            row=2, column=0, padx=5, pady=5, sticky="w"
+        )
+        self.third_label = ttk.Label(file_frame, text="No file selected (optional)", width=70, style="Card.TLabel")
+        self.third_label.grid(row=2, column=1, padx=5, pady=5, sticky="w")
+
+        ttk.Label(file_frame, text="Output file", style="Card.TLabel").grid(row=3, column=0, padx=5, pady=5, sticky="w")
+        output_frame = ttk.Frame(file_frame)
+        output_frame.grid(row=3, column=1, padx=5, pady=5, sticky="ew")
+        self.output_entry = ttk.Entry(output_frame, textvariable=self.output_path)
+        self.output_entry.pack(side="left", fill="x", expand=True)
+        ttk.Button(output_frame, text="Browse", command=self._select_output_file, style="Primary.TButton").pack(side="left", padx=(8, 0))
+
+        file_frame.columnconfigure(1, weight=1)
 
     def _build_column_selectors(self) -> None:
-        columns_frame = ttk.LabelFrame(self.root, text="2) Choose columns", padding=10)
+        columns_frame = ttk.LabelFrame(self.scroll_frame, text="2) Choose columns", padding=10, style="Card.TLabelframe")
         columns_frame.pack(fill="x", padx=10, pady=10)
 
-        ttk.Label(columns_frame, text="Primary keys (first file)").grid(row=0, column=0, sticky="w")
+        ttk.Label(columns_frame, text="Match keys (first file)", style="Card.TLabel").grid(row=0, column=0, sticky="w")
         self.pk_list_legacy = tk.Listbox(columns_frame, selectmode="multiple", height=6, exportselection=False)
         self.pk_list_legacy.grid(row=1, column=0, padx=5, pady=5, sticky="nsew")
 
-        ttk.Label(columns_frame, text="Primary keys (second file)").grid(row=0, column=1, sticky="w")
+        ttk.Label(columns_frame, text="Match keys (second file)", style="Card.TLabel").grid(row=0, column=1, sticky="w")
         self.pk_list_converted = tk.Listbox(columns_frame, selectmode="multiple", height=6, exportselection=False)
         self.pk_list_converted.grid(row=1, column=1, padx=5, pady=5, sticky="nsew")
 
-        ttk.Label(columns_frame, text="Match column (first file)").grid(row=2, column=0, sticky="w", pady=(10, 0))
+        ttk.Label(columns_frame, text="Compare column (first file)", style="Card.TLabel").grid(row=2, column=0, sticky="w", pady=(10, 0))
         self.match_legacy = ttk.Combobox(columns_frame, state="readonly")
         self.match_legacy.grid(row=3, column=0, padx=5, pady=5, sticky="ew")
 
-        ttk.Label(columns_frame, text="Match column (second file)").grid(row=2, column=1, sticky="w", pady=(10, 0))
+        ttk.Label(columns_frame, text="Compare column (second file)", style="Card.TLabel").grid(row=2, column=1, sticky="w", pady=(10, 0))
         self.match_converted = ttk.Combobox(columns_frame, state="readonly")
         self.match_converted.grid(row=3, column=1, padx=5, pady=5, sticky="ew")
 
         columns_frame.columnconfigure(0, weight=1)
         columns_frame.columnconfigure(1, weight=1)
+        self._style_listboxes()
 
     def _build_options(self) -> None:
-        options_frame = ttk.LabelFrame(self.root, text="3) Options", padding=10)
+        options_frame = ttk.LabelFrame(self.scroll_frame, text="3) Options", padding=10, style="Card.TLabelframe")
         options_frame.pack(fill="x", padx=10, pady=10)
 
         self.distinct_var = tk.BooleanVar(value=True)
-        ttk.Checkbutton(options_frame, text="Aggregate by primary keys before comparing", variable=self.distinct_var).grid(row=0, column=0, columnspan=2, sticky="w", pady=5)
+        ttk.Checkbutton(
+            options_frame,
+            text="Aggregate by match keys before comparing",
+            variable=self.distinct_var,
+            style="Card.TCheckbutton",
+        ).grid(row=0, column=0, columnspan=2, sticky="w", pady=5)
 
-        ttk.Label(options_frame, text="Tolerance type").grid(row=1, column=0, sticky="w", pady=(10, 0))
+        ttk.Label(options_frame, text="Tolerance type", style="Card.TLabel").grid(row=1, column=0, sticky="w", pady=(10, 0))
         self.tolerance_type = ttk.Combobox(options_frame, state="readonly", values=["None", "Dollar ($)", "Percentage (%)"])
         self.tolerance_type.current(0)
         self.tolerance_type.grid(row=2, column=0, padx=5, pady=5, sticky="ew")
         self.tolerance_type.bind("<<ComboboxSelected>>", self._on_tolerance_change)
 
-        ttk.Label(options_frame, text="Tolerance value").grid(row=1, column=1, sticky="w", pady=(10, 0))
+        ttk.Label(options_frame, text="Tolerance value", style="Card.TLabel").grid(row=1, column=1, sticky="w", pady=(10, 0))
         self.tolerance_value = ttk.Entry(options_frame)
         self.tolerance_value.grid(row=2, column=1, padx=5, pady=5, sticky="ew")
         self.tolerance_value.configure(state="disabled")
@@ -90,12 +178,14 @@ class ReconApp:
         options_frame.columnconfigure(1, weight=1)
 
     def _build_run_section(self) -> None:
-        run_frame = ttk.LabelFrame(self.root, text="4) Run", padding=10)
+        run_frame = ttk.LabelFrame(self.scroll_frame, text="4) Run", padding=10, style="Card.TLabelframe")
         run_frame.pack(fill="both", expand=True, padx=10, pady=10)
 
-        ttk.Button(run_frame, text="Run comparison", command=self._run_comparison).pack(anchor="w", pady=5)
+        self.run_button = ttk.Button(run_frame, text="Run comparison", command=self._run_comparison, style="Primary.TButton")
+        self.run_button.pack(fill="x", pady=(4, 10))
         self.summary_text = tk.Text(run_frame, height=12, state="disabled", wrap="word")
         self.summary_text.pack(fill="both", expand=True)
+        self._style_summary_text()
 
     # ----------------------------- Event handlers ----------------------------- #
     def _select_file(self, key: str) -> None:
@@ -115,6 +205,16 @@ class ReconApp:
         label_map = {"legacy": self.legacy_label, "converted": self.converted_label, "third": self.third_label}
         label_map[key].configure(text=path)
         self._refresh_columns()
+
+    def _select_output_file(self) -> None:
+        path = filedialog.asksaveasfilename(
+            title="Select output file",
+            defaultextension=".xlsx",
+            filetypes=[("Excel files", "*.xlsx"), ("All files", "*.*")],
+        )
+        if not path:
+            return
+        self.output_path.set(path)
 
     def _refresh_columns(self) -> None:
         if self.dataframes["legacy"] is None or self.dataframes["converted"] is None:
@@ -154,13 +254,18 @@ class ReconApp:
         pk_legacy = self._selected_items(self.pk_list_legacy)
         pk_converted = self._selected_items(self.pk_list_converted)
         if not pk_legacy or not pk_converted:
-            messagebox.showwarning("Missing primary keys", "Select one or more primary key columns for each file.")
+            messagebox.showwarning("Missing match keys", "Select one or more match key columns for each file.")
             return
 
         match_col_legacy = self.match_legacy.get()
         match_col_converted = self.match_converted.get()
         if not match_col_legacy or not match_col_converted:
-            messagebox.showwarning("Missing match columns", "Select match columns for both files.")
+            messagebox.showwarning("Missing compare columns", "Select compare columns for both files.")
+            return
+
+        output_file = self.output_path.get().strip()
+        if not output_file:
+            messagebox.showwarning("Missing output file", "Select an output file before running the comparison.")
             return
 
         tolerance_type = self.tolerance_type.get()
@@ -179,11 +284,108 @@ class ReconApp:
             pk_converted,
             match_col_legacy,
             match_col_converted,
+            output_file=output_file,
             tolerance_type=None if tolerance_type == "None" else tolerance_type,
             tolerance_value=tolerance_value,
             distinct_list=self.distinct_var.get(),
         )
         self._display_summary(result)
+
+    def _configure_styles(self) -> None:
+        style = ttk.Style()
+        try:
+            style.theme_use("clam")
+        except tk.TclError:
+            pass
+
+        self.root.option_add("*Font", (self.base_font, 10))
+        self.root.option_add("*Background", self.brand_colors["cool_gray"])
+
+        style.configure(
+            ".",
+            background=self.brand_colors["cool_gray"],
+            foreground=self.brand_colors["midnight"],
+            font=(self.base_font, 10),
+        )
+        style.configure(
+            "TLabel",
+            background=self.brand_colors["cool_gray"],
+            foreground=self.brand_colors["midnight"],
+        )
+        style.configure(
+            "Card.TLabelframe",
+            background=self.brand_colors["white"],
+            foreground=self.brand_colors["primary_blue"],
+            font=(self.base_font, 11, "bold"),
+        )
+        style.configure(
+            "Card.TLabelframe.Label",
+            background=self.brand_colors["white"],
+            foreground=self.brand_colors["primary_blue"],
+            font=(self.base_font, 11, "bold"),
+        )
+        style.configure("Card.TLabel", background=self.brand_colors["white"], foreground=self.brand_colors["midnight"])
+        style.configure("TFrame", background=self.brand_colors["white"])
+        style.configure(
+            "TEntry",
+            fieldbackground=self.brand_colors["white"],
+            foreground=self.brand_colors["midnight"],
+        )
+        style.configure(
+            "TCombobox",
+            fieldbackground=self.brand_colors["white"],
+            foreground=self.brand_colors["midnight"],
+        )
+        style.configure(
+            "Primary.TButton",
+            background=self.brand_colors["primary_blue"],
+            foreground=self.brand_colors["white"],
+            font=(self.base_font, 11, "bold"),
+            padding=(12, 6),
+        )
+        style.map(
+            "Primary.TButton",
+            background=[("active", self.brand_colors["primary_green"]), ("disabled", self.brand_colors["cool_gray"])],
+            foreground=[("disabled", "#7A7A8A")],
+        )
+        style.configure(
+            "Card.TCheckbutton",
+            background=self.brand_colors["white"],
+            foreground=self.brand_colors["midnight"],
+        )
+
+    def _style_listboxes(self) -> None:
+        listbox_style = {
+            "background": self.brand_colors["white"],
+            "foreground": self.brand_colors["midnight"],
+            "highlightbackground": self.brand_colors["primary_blue"],
+            "selectbackground": self.brand_colors["primary_green"],
+            "selectforeground": self.brand_colors["white"],
+            "font": (self.base_font, 10),
+        }
+        self.pk_list_legacy.configure(**listbox_style)
+        self.pk_list_converted.configure(**listbox_style)
+
+    def _style_summary_text(self) -> None:
+        self.summary_text.configure(
+            background=self.brand_colors["white"],
+            foreground=self.brand_colors["midnight"],
+            padx=10,
+            pady=8,
+            borderwidth=0,
+            font=(self.base_font, 10),
+        )
+
+    @staticmethod
+    def _resolve_font_family() -> str:
+        try:
+            available = set(font.families())
+        except tk.TclError:
+            return "TkDefaultFont"
+        for family in ("Titillium Web", "Titillium", "Roboto", "Segoe UI", "Arial"):
+            if family in available:
+                return family
+        return "TkDefaultFont"
 
     @staticmethod
     def _selected_items(listbox: tk.Listbox) -> list[str]:
@@ -212,6 +414,7 @@ def compare_data(
     pk_converted: list[str],
     match_col_legacy: str,
     match_col_converted: str,
+    output_file: str,
     tolerance_type: str | None = None,
     tolerance_value: float | None = None,
     distinct_list: bool = True,
@@ -264,11 +467,10 @@ def compare_data(
     matched_percentage = (matched_records / total_records) * 100 if total_records else 0
 
     summary_lines = [
-        f"Output written to Output.xlsx ({total_records} rows)",
+        f"Output written to {output_file} ({total_records} rows)",
         f"Matched records: {matched_records} ({matched_percentage:.2f}%)",
     ]
 
-    output_file = "Output.xlsx"
     merged_df.to_excel(output_file, index=False)
 
     return ComparisonResult(merged_df, "\n".join(summary_lines))
