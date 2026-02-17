@@ -5,8 +5,10 @@ and download reconciliation results. The resulting comparison is written
 to an Excel file and displayed on screen.
 """
 
+import base64
 import os
 from dataclasses import dataclass
+from io import BytesIO
 
 import pandas as pd
 import streamlit as st
@@ -194,7 +196,7 @@ def main():
     """Main Streamlit application."""
 
     # Page config
-    st.set_page_config(page_title="Reconciliation", layout="centered")
+    st.set_page_config(page_title="Reconciliation", layout="wide")
 
     # Brand colors
     brand_colors = {
@@ -205,21 +207,32 @@ def main():
         "white": "#FFFFFF",
     }
 
-    # Custom CSS for brand colors and compact layout
+    # Logo SVG with white text (converted from the provided logo)
+    logo_svg = """
+    <svg width="200" height="40" xmlns="http://www.w3.org/2000/svg">
+        <text x="0" y="30" font-family="Arial, sans-serif" font-size="32" font-weight="bold" fill="#FFFFFF">definian</text>
+        <rect x="160" y="5" width="15" height="15" fill="#00AB63" rx="3"/>
+        <rect x="180" y="5" width="15" height="15" fill="#00AB63" rx="3"/>
+    </svg>
+    """
+
+    # Custom CSS for brand colors, layout, and background
     st.markdown(
         f"""
         <style>
         .stApp {{
-            background-color: {brand_colors['midnight']};
+            background: linear-gradient(to right, {brand_colors['midnight']} 0%, {brand_colors['midnight']} 70%, rgba(2, 7, 45, 0.9) 100%),
+                        url('data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 600"><defs><linearGradient id="g1" x1="0%25" y1="0%25" x2="100%25" y2="100%25"><stop offset="0%25" style="stop-color:%2300AB63;stop-opacity:0.3" /><stop offset="100%25" style="stop-color:%2300AB63;stop-opacity:0.1" /></linearGradient></defs><path d="M 300 50 L 380 50 Q 390 50 390 60 L 390 150 Q 390 160 380 160 L 300 160 Q 290 160 290 150 L 290 60 Q 290 50 300 50 Z" fill="url(%23g1)" transform="rotate(15 340 105)"/><path d="M 320 200 L 400 200 Q 410 200 410 210 L 410 300 Q 410 310 400 310 L 320 310 Q 310 310 310 300 L 310 210 Q 310 200 320 200 Z" fill="url(%23g1)" transform="rotate(-10 355 255)"/><path d="M 300 350 L 380 350 Q 390 350 390 360 L 390 450 Q 390 460 380 460 L 300 460 Q 290 460 290 450 L 290 360 Q 290 350 300 350 Z" fill="url(%23g1)" transform="rotate(20 340 405)"/></svg>') right center / contain no-repeat;
+            background-attachment: fixed;
         }}
         .main {{
-            background-color: {brand_colors['midnight']};
+            background-color: transparent;
         }}
         div[data-testid="stHeader"] {{
             background-color: {brand_colors['midnight']};
         }}
         h1, h2, h3, h4, h5, h6 {{
-            color: {brand_colors['white']};
+            color: {brand_colors['white']} !important;
         }}
         h1 {{
             background-color: {brand_colors['midnight']};
@@ -227,7 +240,31 @@ def main():
             margin: -1rem -1rem 1rem -1rem;
         }}
         p, div, span, label {{
-            color: {brand_colors['white']};
+            color: {brand_colors['white']} !important;
+        }}
+        /* Text on white/gray backgrounds should be black */
+        div[data-baseweb="select"] > div {{
+            color: #000000 !important;
+        }}
+        input {{
+            color: #000000 !important;
+            background-color: {brand_colors['white']};
+        }}
+        .uploadedFile {{
+            background-color: {brand_colors['white']};
+            color: #000000 !important;
+        }}
+        /* Make sure text in dropdown options is black */
+        div[role="listbox"] div {{
+            color: #000000 !important;
+        }}
+        /* Results text should be white on midnight background */
+        .stMarkdown {{
+            color: {brand_colors['white']} !important;
+        }}
+        pre {{
+            color: {brand_colors['white']} !important;
+            background-color: rgba(255, 255, 255, 0.1) !important;
         }}
         .stButton>button {{
             background-color: {brand_colors['primary_blue']};
@@ -251,31 +288,30 @@ def main():
         .stDownloadButton>button:hover {{
             background-color: {brand_colors['primary_green']};
         }}
-        .uploadedFile {{
-            background-color: {brand_colors['white']};
-        }}
-        div[data-baseweb="select"] {{
-            background-color: {brand_colors['white']};
-        }}
-        input {{
-            background-color: {brand_colors['white']};
-        }}
-        .stSelectbox label, .stMultiSelect label, .stNumberInput label {{
+        .stSelectbox label, .stMultiSelect label, .stNumberInput label, .stCheckbox label {{
             color: {brand_colors['white']} !important;
         }}
-        .stMarkdown {{
-            color: {brand_colors['white']};
+        /* Make dataframe larger */
+        div[data-testid="stDataFrame"] {{
+            height: 600px !important;
+        }}
+        /* Success/info messages */
+        .stSuccess, .stInfo {{
+            color: {brand_colors['white']} !important;
         }}
         </style>
         """,
         unsafe_allow_html=True,
     )
 
-    # Header
+    # Header with logo
     st.markdown(
         f"""
-        <div style="background-color: {brand_colors['midnight']}; padding: 1.5rem; margin: -1rem -1rem 2rem -1rem;">
-            <h1 style="margin: 0; color: {brand_colors['white']};">Reconciliation</h1>
+        <div style="background-color: {brand_colors['midnight']}; padding: 1.5rem; margin: -1rem -1rem 2rem -1rem; display: flex; align-items: center; gap: 2rem;">
+            <div style="flex-shrink: 0;">
+                {logo_svg}
+            </div>
+            <h1 style="margin: 0; color: {brand_colors['white']}; flex-grow: 1;">Reconciliation</h1>
         </div>
         """,
         unsafe_allow_html=True,
@@ -289,123 +325,137 @@ def main():
     if "result" not in st.session_state:
         st.session_state.result = None
 
-    # Upload Files section
-    st.markdown("### Upload Files")
-    first_file = st.file_uploader(
-        "Select first file",
-        type=["xlsx", "xls"],
-        key="first_file",
-        help="Upload the first Excel file to compare",
-    )
-    if first_file:
-        try:
-            st.session_state.first_df = pd.read_excel(first_file)
-            st.success(f"✓ Loaded: {first_file.name}")
-        except Exception as e:
-            st.error(f"Error reading first file: {e}")
-            st.session_state.first_df = None
+    # Create two columns for Upload Files and Configure sections
+    col1, col2 = st.columns(2)
 
-    second_file = st.file_uploader(
-        "Select second file",
-        type=["xlsx", "xls"],
-        key="second_file",
-        help="Upload the second Excel file to compare",
-    )
-    if second_file:
-        try:
-            st.session_state.second_df = pd.read_excel(second_file)
-            st.success(f"✓ Loaded: {second_file.name}")
-        except Exception as e:
-            st.error(f"Error reading second file: {e}")
-            st.session_state.second_df = None
-
-    # Configure section
-    st.markdown("### Configure")
-
-    if st.session_state.first_df is not None and st.session_state.second_df is not None:
-        first_cols = list(st.session_state.first_df.columns)
-        second_cols = list(st.session_state.second_df.columns)
-
-        # Match keys
-        st.markdown("**Match keys (first file)**")
-        match_keys_first = st.multiselect(
-            "Select one or more columns",
-            first_cols,
-            key="match_keys_first",
-            label_visibility="collapsed",
+    # Upload Files section (left column)
+    with col1:
+        st.markdown("### Upload Files")
+        first_file = st.file_uploader(
+            "Select first file",
+            type=["xlsx", "xls"],
+            key="first_file",
+            help="Upload the first Excel file to compare",
         )
+        if first_file:
+            try:
+                st.session_state.first_df = pd.read_excel(first_file)
+                st.success(f"✓ Loaded: {first_file.name}")
+            except Exception as e:
+                st.error(f"Error reading first file: {e}")
+                st.session_state.first_df = None
 
-        st.markdown("**Match keys (second file)**")
-        match_keys_second = st.multiselect(
-            "Select one or more columns",
-            second_cols,
-            key="match_keys_second",
-            label_visibility="collapsed",
+        second_file = st.file_uploader(
+            "Select second file",
+            type=["xlsx", "xls"],
+            key="second_file",
+            help="Upload the second Excel file to compare",
         )
+        if second_file:
+            try:
+                st.session_state.second_df = pd.read_excel(second_file)
+                st.success(f"✓ Loaded: {second_file.name}")
+            except Exception as e:
+                st.error(f"Error reading second file: {e}")
+                st.session_state.second_df = None
 
-        # Compare columns
-        st.markdown("**Compare column (first file)**")
-        compare_col_first = st.selectbox(
-            "Select compare column",
-            first_cols,
-            key="compare_col_first",
-            label_visibility="collapsed",
-        )
+    # Configure section (right column)
+    with col2:
+        st.markdown("### Configure")
 
-        st.markdown("**Compare column (second file)**")
-        compare_col_second = st.selectbox(
-            "Select compare column",
-            second_cols,
-            key="compare_col_second",
-            label_visibility="collapsed",
-        )
+        if st.session_state.first_df is not None and st.session_state.second_df is not None:
+            first_cols = list(st.session_state.first_df.columns)
+            second_cols = list(st.session_state.second_df.columns)
 
-        # Tolerance options
-        tolerance_type = st.selectbox("Tolerance type", ["None", "Dollar ($)", "Percentage (%)"], index=0)
-
-        tolerance_value = None
-        if tolerance_type != "None":
-            tolerance_value = st.number_input(
-                "Tolerance value",
-                min_value=0.0,
-                value=0.0,
-                step=0.01,
-                format="%.2f",
+            # Match keys
+            st.markdown("**Match keys (first file)**")
+            match_keys_first = st.multiselect(
+                "Select one or more columns",
+                first_cols,
+                key="match_keys_first",
+                label_visibility="collapsed",
             )
 
-        # Run comparison button
-        if st.button("Run Comparison", use_container_width=False):
-            if not match_keys_first or not match_keys_second:
-                st.error("Please select match key columns for both files.")
-            elif not compare_col_first or not compare_col_second:
-                st.error("Please select compare columns for both files.")
-            else:
-                try:
-                    with st.spinner("Running comparison..."):
-                        result = compare_data(
-                            st.session_state.first_df,
-                            st.session_state.second_df,
-                            match_keys_first,
-                            match_keys_second,
-                            compare_col_first,
-                            compare_col_second,
-                            output_file=None,
-                            tolerance_type=None if tolerance_type == "None" else tolerance_type,
-                            tolerance_value=tolerance_value if tolerance_type != "None" else None,
-                            distinct_list=True,
-                        )
-                        st.session_state.result = result
-                        st.success("Comparison complete!")
-                except Exception as e:
-                    st.error(f"Error during comparison: {e}")
-                    st.session_state.result = None
-    else:
-        st.info("Upload both files to configure the comparison")
+            st.markdown("**Match keys (second file)**")
+            match_keys_second = st.multiselect(
+                "Select one or more columns",
+                second_cols,
+                key="match_keys_second",
+                label_visibility="collapsed",
+            )
+
+            # Compare columns
+            st.markdown("**Compare column (first file)**")
+            compare_col_first = st.selectbox(
+                "Select compare column",
+                first_cols,
+                key="compare_col_first",
+                label_visibility="collapsed",
+            )
+
+            st.markdown("**Compare column (second file)**")
+            compare_col_second = st.selectbox(
+                "Select compare column",
+                second_cols,
+                key="compare_col_second",
+                label_visibility="collapsed",
+            )
+
+            # Tolerance options
+            tolerance_type = st.selectbox("Tolerance type", ["None", "Dollar ($)", "Percentage (%)"], index=0)
+
+            tolerance_value = None
+            if tolerance_type != "None":
+                tolerance_value = st.number_input(
+                    "Tolerance value",
+                    min_value=0.0,
+                    value=0.0,
+                    step=0.01,
+                    format="%.2f",
+                )
+
+            # Run comparison button
+            if st.button("Run Comparison", use_container_width=False):
+                if not match_keys_first or not match_keys_second:
+                    st.error("Please select match key columns for both files.")
+                elif not compare_col_first or not compare_col_second:
+                    st.error("Please select compare columns for both files.")
+                else:
+                    try:
+                        with st.spinner("Running comparison..."):
+                            result = compare_data(
+                                st.session_state.first_df,
+                                st.session_state.second_df,
+                                match_keys_first,
+                                match_keys_second,
+                                compare_col_first,
+                                compare_col_second,
+                                output_file=None,
+                                tolerance_type=None if tolerance_type == "None" else tolerance_type,
+                                tolerance_value=tolerance_value if tolerance_type != "None" else None,
+                                distinct_list=True,
+                            )
+                            st.session_state.result = result
+                            st.success("Comparison complete!")
+                    except Exception as e:
+                        st.error(f"Error during comparison: {e}")
+                        st.session_state.result = None
+        else:
+            st.info("Upload both files to configure the comparison")
 
     # Display results automatically
     if st.session_state.result:
         st.markdown("### Results")
-        st.text(st.session_state.result.summary_text)
+
+        # Display summary in white text on midnight background
+        st.markdown(
+            f"""
+            <div style="background-color: {brand_colors['midnight']}; padding: 1rem; border-radius: 4px; margin-bottom: 1rem;">
+                <pre style="color: {brand_colors['white']}; margin: 0; font-family: monospace;">{st.session_state.result.summary_text}</pre>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
 
         # Filter options for preview
         st.markdown("**Filter Results**")
@@ -424,24 +474,45 @@ def main():
         elif show_matches_only and not show_differences_only:
             filtered_df = filtered_df[~filtered_df["Difference"]]
 
-        # Show preview
+        # Show preview with larger size
         st.markdown(f"**Preview Results ({len(filtered_df)} rows)**")
-        st.dataframe(filtered_df, use_container_width=True, height=400)
+        st.dataframe(filtered_df, use_container_width=True, height=600)
 
-        # Generate Excel file for download
-        output_filename = "reconciliation_results.xlsx"
-        filtered_df.to_excel(output_filename, index=False)
-        _format_output(output_filename, filtered_df)
+        # Generate Excel file for download with custom filename support
+        st.markdown("**Download Options**")
+        download_filename = st.text_input(
+            "File name for download",
+            value="reconciliation_results.xlsx",
+            help="Enter the desired filename (must end with .xlsx)",
+        )
+
+        # Ensure filename ends with .xlsx
+        if not download_filename.endswith(".xlsx"):
+            download_filename += ".xlsx"
+
+        # Create Excel file in memory
+        output_buffer = BytesIO()
+        filtered_df.to_excel(output_buffer, index=False)
+        output_buffer.seek(0)
+
+        # Load and format the Excel file
+        temp_filename = "temp_reconciliation_results.xlsx"
+        with open(temp_filename, "wb") as f:
+            f.write(output_buffer.getvalue())
+        _format_output(temp_filename, filtered_df)
+
+        # Read the formatted file for download
+        with open(temp_filename, "rb") as f:
+            excel_data = f.read()
 
         # Provide download button
-        with open(output_filename, "rb") as f:
-            st.download_button(
-                label="Download Results",
-                data=f,
-                file_name=output_filename,
-                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                use_container_width=False,
-            )
+        st.download_button(
+            label="Download Results",
+            data=excel_data,
+            file_name=download_filename,
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            use_container_width=False,
+        )
 
 
 if __name__ == "__main__":
