@@ -27,10 +27,10 @@ class ReconApp:
         self.output_path = tk.StringVar(value="Output.xlsx")
 
         self.brand_colors = {
-            "primary_blue": "#001A72",
-            "primary_green": "#00B388",
-            "midnight": "#1B2A41",
-            "cool_gray": "#D8D7EE",
+            "primary_blue": "#2F2891",  # PANTONE 2748
+            "primary_green": "#00A68C",  # PANTONE 3405
+            "midnight": "#1C2340",  # PANTONE 533
+            "cool_gray": "#D9D9D6",  # PANTONE Cool Gray 1
             "white": "#FFFFFF",
         }
         self.base_font = self._resolve_font_family()
