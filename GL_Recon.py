@@ -190,7 +190,13 @@ def _format_output(output_file: str, merged_df: pd.DataFrame) -> None:
 
     workbook.save(output_file)
 
+def load_svg(path):
+    with open(path, "r") as f:
+        return f.read()
 
+#def get_base64_svg(path):
+#    with open(path, "rb") as f:
+#        return base64.b64encode(f.read()).decode()
 # ----------------------------- Streamlit UI ----------------------------- #
 def main():
     """Main Streamlit application."""
@@ -208,25 +214,57 @@ def main():
     }
 
     # Logo SVG with white text (converted from the provided logo)
-    logo_svg = """
-    <svg width="200" height="40" xmlns="http://www.w3.org/2000/svg">
-        <text x="0" y="30" font-family="Arial, sans-serif" font-size="32" font-weight="bold" fill="#FFFFFF">definian</text>
-        <rect x="160" y="5" width="15" height="15" fill="#00AB63" rx="3"/>
-        <rect x="180" y="5" width="15" height="15" fill="#00AB63" rx="3"/>
-    </svg>
-    """
+    #logo_svg = """
+    #<svg width="200" height="40" xmlns="http://www.w3.org/2000/svg">
+    #    <text x="0" y="30" font-family="Arial, sans-serif" font-size="32" font-weight="bold" fill="#FFFFFF">definian</text>
+    #    <rect x="160" y="5" width="15" height="15" fill="#00AB63" rx="3"/>
+    #    <rect x="180" y="5" width="15" height="15" fill="#00AB63" rx="3"/>
+    #</svg>
+    #"""
+    logo_svg = load_svg("assets/modernization.svg")
+    #background_svg = get_base64_svg("assets/Trapz.svg")
 
     # Custom CSS for brand colors, layout, and background
     st.markdown(
         f"""
         <style>
         .stApp {{
-            background: linear-gradient(to right, {brand_colors['midnight']} 0%, {brand_colors['midnight']} 70%, rgba(2, 7, 45, 0.9) 100%),
-                        url('data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 600"><defs><linearGradient id="g1" x1="0%25" y1="0%25" x2="100%25" y2="100%25"><stop offset="0%25" style="stop-color:%2300AB63;stop-opacity:0.3" /><stop offset="100%25" style="stop-color:%2300AB63;stop-opacity:0.1" /></linearGradient></defs><path d="M 300 50 L 380 50 Q 390 50 390 60 L 390 150 Q 390 160 380 160 L 300 160 Q 290 160 290 150 L 290 60 Q 290 50 300 50 Z" fill="url(%23g1)" transform="rotate(15 340 105)"/><path d="M 320 200 L 400 200 Q 410 200 410 210 L 410 300 Q 410 310 400 310 L 320 310 Q 310 310 310 300 L 310 210 Q 310 200 320 200 Z" fill="url(%23g1)" transform="rotate(-10 355 255)"/><path d="M 300 350 L 380 350 Q 390 350 390 360 L 390 450 Q 390 460 380 460 L 300 460 Q 290 460 290 450 L 290 360 Q 290 350 300 350 Z" fill="url(%23g1)" transform="rotate(20 340 405)"/></svg>') right center / contain no-repeat;
+            background-color: {brand_colors['midnight']};
             background-attachment: fixed;
+        }}
+        /* Right-side SVG container */
+        .right-bg {{
+            position: fixed;
+            top: 0;
+            right: 0;
+            height: 100vh;
+            width: 50vw;                /* Only right half */
+            display: flex;
+            justify-content: flex-end;
+            align-items: center;
+            pointer-events: none;       /* So it doesn't block UI */
+            z-index: -1;
+            opacity: 0.25;              /* Subtle overlay */
+        }}
+        /* Make SVG scale nicely */
+        .right-bg svg {{
+            height: 80vh;
+            width: auto;
         }}
         .main {{
             background-color: transparent;
+        }}
+        /* Change the color of "Drag and drop..." and file size text to black */
+        div[data-testid="stFileUploader"] label {{
+            color: black !important;
+        }}
+        /* Change the color of the text to black if you are using dark mode */
+        div[data-testid="stFileUploader"] span {{
+            color: black !important;
+        }}
+        /* "Browse files" button */
+        div[data-testid="stFileUploader"] button {{
+            color: black !important;
         }}
         div[data-testid="stHeader"] {{
             background-color: {brand_colors['midnight']};
@@ -304,12 +342,19 @@ def main():
         unsafe_allow_html=True,
     )
 
+    # Load SVG
+    with open("assets/Trapz.svg", "r") as f:
+        background_svg = f.read()
+
     # Header with logo
     st.markdown(
         f"""
         <div style="background-color: {brand_colors['midnight']}; padding: 1.5rem; margin: -1rem -1rem 2rem -1rem; display: flex; align-items: center; gap: 2rem;">
-            <div style="flex-shrink: 0;">
+            <div style="text-align: center; width: 75px;">
                 {logo_svg}
+            </div>
+            <div class="right-bg">
+                {background_svg}
             </div>
             <h1 style="margin: 0; color: {brand_colors['white']}; flex-grow: 1;">Reconciliation</h1>
         </div>
