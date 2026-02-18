@@ -229,7 +229,7 @@ def main():
         f"""
         <style>
         .stApp {{
-            background-color: {brand_colors['midnight']};
+            background-color: {brand_colors['primary_blue']};
             background-attachment: fixed;
         }}
         /* Right-side SVG container */
@@ -267,13 +267,13 @@ def main():
             color: black !important;
         }}
         div[data-testid="stHeader"] {{
-            background-color: {brand_colors['midnight']};
+            background-color: {brand_colors['primary_blue']};
         }}
         h1, h2, h3, h4, h5, h6 {{
             color: {brand_colors['white']} !important;
         }}
         h1 {{
-            background-color: {brand_colors['midnight']};
+            background-color: {brand_colors['primary_blue']};
             padding: 1rem;
             margin: -1rem -1rem 1rem -1rem;
         }}
@@ -296,7 +296,7 @@ def main():
         div[role="listbox"] div {{
             color: #000000 !important;
         }}
-        /* Results text should be white on midnight background */
+        /* Results text should be white on primary_blue background */
         .stMarkdown {{
             color: {brand_colors['white']} !important;
         }}
@@ -349,7 +349,7 @@ def main():
     # Header with logo
     st.markdown(
         f"""
-        <div style="background-color: {brand_colors['midnight']}; padding: 1.5rem; margin: -1rem -1rem 2rem -1rem; display: flex; align-items: center; gap: 2rem;">
+        <div style="background-color: {brand_colors['primary_blue']}; padding: 1.5rem; margin: -1rem -1rem 2rem -1rem; display: flex; align-items: center; gap: 2rem;">
             <div style="text-align: center; width: 75px;">
                 {logo_svg}
             </div>
@@ -492,10 +492,10 @@ def main():
     if st.session_state.result:
         st.markdown("### Results")
 
-        # Display summary in white text on midnight background
+        # Display summary in white text on primary_blue background
         st.markdown(
             f"""
-            <div style="background-color: {brand_colors['midnight']}; padding: 1rem; border-radius: 4px; margin-bottom: 1rem;">
+            <div style="background-color: {brand_colors['primary_blue']}; padding: 1rem; border-radius: 4px; margin-bottom: 1rem;">
                 <pre style="color: {brand_colors['white']}; margin: 0; font-family: monospace;">{st.session_state.result.summary_text}</pre>
             </div>
             """,
