@@ -10,6 +10,7 @@ import os
 from dataclasses import dataclass
 from io import BytesIO
 
+import anthropic
 import pandas as pd
 import streamlit as st
 from openpyxl import load_workbook
@@ -190,9 +191,60 @@ def _format_output(output_file: str, merged_df: pd.DataFrame) -> None:
 
     workbook.save(output_file)
 
+
 def load_svg(path):
     with open(path, "r") as f:
         return f.read()
+
+
+def query_results_with_nlq(df: pd.DataFrame, question: str) -> tuple[pd.DataFrame | None, str]:
+    """Use Claude to interpret a natural language question and filter or summarise the dataframe.
+
+    Returns a (filtered_df, answer_text) tuple. filtered_df is None when Claude returns a
+    direct text answer rather than a row filter.
+    """
+    schema = "\n".join(f"- {col} (dtype: {df[col].dtype})" for col in df.columns)
+    sample = df.head(5).to_string(index=False)
+
+    client = anthropic.Anthropic()
+    message = client.messages.create(
+        model="claude-haiku-4-5-20251001",
+        max_tokens=512,
+        system=(
+            "You are a data analyst assistant helping users query a pandas DataFrame of "
+            "financial reconciliation results. When given a question, respond in one of two ways:\n\n"
+            "1. If the question can be answered by filtering rows, respond with ONLY a valid "
+            "Python boolean expression using the variable `df` "
+            "(e.g. `df['Difference'] == True` or `df['Percentage Difference'].abs() > 0.05`). "
+            "Do not include any explanation — just the expression.\n\n"
+            "2. If the question asks for a count, summary, or cannot be answered by a simple "
+            "row filter, respond with a plain-English answer prefixed with exactly 'ANSWER: '.\n\n"
+            "Column names must match the schema exactly, including spaces and capitalisation."
+        ),
+        messages=[
+            {
+                "role": "user",
+                "content": (
+                    f"DataFrame schema:\n{schema}\n\n"
+                    f"Sample data (first 5 rows):\n{sample}\n\n"
+                    f"Question: {question}"
+                ),
+            }
+        ],
+    )
+
+    response = message.content[0].text.strip()
+
+    if response.startswith("ANSWER:"):
+        return None, response[7:].strip()
+
+    try:
+        mask = eval(response, {"__builtins__": {}}, {"df": df, "pd": pd})  # noqa: S307
+        filtered = df[mask].reset_index(drop=True)
+        return filtered, f"Found {len(filtered)} record(s) matching your query."
+    except Exception as exc:
+        return None, f"I couldn't apply that filter: {exc}"
+
 
 #def get_base64_svg(path):
 #    with open(path, "rb") as f:
@@ -223,6 +275,10 @@ def main():
     #"""
     logo_svg = load_svg("assets/modernization.svg")
     #background_svg = get_base64_svg("assets/Trapz.svg")
+
+    # Expose ANTHROPIC_API_KEY from Streamlit secrets to the environment if present
+    if "ANTHROPIC_API_KEY" in st.secrets:
+        os.environ["ANTHROPIC_API_KEY"] = st.secrets["ANTHROPIC_API_KEY"]
 
     # Custom CSS for brand colors, layout, and background
     st.markdown(
@@ -369,6 +425,8 @@ def main():
         st.session_state.second_df = None
     if "result" not in st.session_state:
         st.session_state.result = None
+    if "nlq_result" not in st.session_state:
+        st.session_state.nlq_result = None  # tuple(filtered_df | None, answer_text)
 
     # Create two columns for Upload Files and Configure sections
     col1, col2 = st.columns(2)
@@ -481,6 +539,7 @@ def main():
                                 distinct_list=True,
                             )
                             st.session_state.result = result
+                            st.session_state.nlq_result = None  # reset NLQ on new comparison
                             st.success("Comparison complete!")
                     except Exception as e:
                         st.error(f"Error during comparison: {e}")
@@ -558,6 +617,57 @@ def main():
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             use_container_width=False,
         )
+
+        # ------------------------------------------------------------------ #
+        # Natural Language Query section
+        # ------------------------------------------------------------------ #
+        st.markdown("---")
+        st.markdown("### Ask a Question About the Results")
+        st.markdown(
+            "Query the reconciliation data in plain English. "
+            "*Examples: \"Show me any differences over 5%\" &nbsp;·&nbsp; "
+            "\"Can you show me any records for Supplier ACME Widgets\"*"
+        )
+
+        nlq_col1, nlq_col2 = st.columns([5, 1])
+        with nlq_col1:
+            nlq_question = st.text_input(
+                "Your question",
+                placeholder="e.g. Show me any differences over 5%",
+                key="nlq_question",
+                label_visibility="collapsed",
+            )
+        with nlq_col2:
+            nlq_submit = st.button("Ask", use_container_width=True, key="nlq_submit")
+
+        if nlq_submit and nlq_question:
+            api_key = os.environ.get("ANTHROPIC_API_KEY", "")
+            if not api_key:
+                st.error(
+                    "ANTHROPIC_API_KEY is not configured. "
+                    "Add it to .streamlit/secrets.toml or set it as an environment variable."
+                )
+            else:
+                with st.spinner("Analysing your question..."):
+                    nlq_df, nlq_answer = query_results_with_nlq(
+                        st.session_state.result.merged, nlq_question
+                    )
+                st.session_state.nlq_result = (nlq_df, nlq_answer)
+
+        if st.session_state.nlq_result is not None:
+            nlq_df, nlq_answer = st.session_state.nlq_result
+            st.markdown(
+                f"""
+                <div style="background-color: {brand_colors['primary_blue']}; padding: 1rem;
+                            border-radius: 4px; margin-bottom: 1rem;
+                            border-left: 4px solid {brand_colors['primary_green']};">
+                    <p style="color: {brand_colors['white']}; margin: 0;">{nlq_answer}</p>
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
+            if nlq_df is not None:
+                st.dataframe(nlq_df, use_container_width=True, height=400)
 
 
 if __name__ == "__main__":
