@@ -6,6 +6,7 @@ to an Excel file and displayed on screen.
 """
 
 import base64
+import json
 import os
 from dataclasses import dataclass
 from io import BytesIO
@@ -15,6 +16,8 @@ import pandas as pd
 import streamlit as st
 from openpyxl import load_workbook
 
+PROFILES_FILE = "config_profiles.json"
+
 
 @dataclass
 class ComparisonResult:
@@ -22,6 +25,30 @@ class ComparisonResult:
 
     merged: pd.DataFrame
     summary_text: str
+
+
+def load_profiles() -> dict:
+    """Return all saved configuration profiles from disk."""
+    if not os.path.exists(PROFILES_FILE):
+        return {}
+    with open(PROFILES_FILE) as f:
+        return json.load(f)
+
+
+def save_profile(name: str, config: dict) -> None:
+    """Persist a named configuration profile to disk."""
+    profiles = load_profiles()
+    profiles[name] = config
+    with open(PROFILES_FILE, "w") as f:
+        json.dump(profiles, f, indent=2)
+
+
+def delete_profile(name: str) -> None:
+    """Remove a named configuration profile from disk."""
+    profiles = load_profiles()
+    profiles.pop(name, None)
+    with open(PROFILES_FILE, "w") as f:
+        json.dump(profiles, f, indent=2)
 
 
 def compare_data(
@@ -198,11 +225,7 @@ def load_svg(path):
 
 
 def query_results_with_nlq(df: pd.DataFrame, question: str) -> tuple[pd.DataFrame | None, str]:
-    """Use Claude to interpret a natural language question and filter or summarise the dataframe.
-
-    Returns a (filtered_df, answer_text) tuple. filtered_df is None when Claude returns a
-    direct text answer rather than a row filter.
-    """
+    """Use Claude to interpret a natural language question and filter or summarise the dataframe."""
     schema = "\n".join(f"- {col} (dtype: {df[col].dtype})" for col in df.columns)
     sample = df.head(5).to_string(index=False)
 
@@ -216,7 +239,7 @@ def query_results_with_nlq(df: pd.DataFrame, question: str) -> tuple[pd.DataFram
             "1. If the question can be answered by filtering rows, respond with ONLY a valid "
             "Python boolean expression using the variable `df` "
             "(e.g. `df['Difference'] == True` or `df['Percentage Difference'].abs() > 0.05`). "
-            "Do not include any explanation — just the expression.\n\n"
+            "Do not include any explanation \u2014 just the expression.\n\n"
             "2. If the question asks for a count, summary, or cannot be answered by a simple "
             "row filter, respond with a plain-English answer prefixed with exactly 'ANSWER: '.\n\n"
             "Column names must match the schema exactly, including spaces and capitalisation."
@@ -253,10 +276,8 @@ def query_results_with_nlq(df: pd.DataFrame, question: str) -> tuple[pd.DataFram
 def main():
     """Main Streamlit application."""
 
-    # Page config
     st.set_page_config(page_title="Reconciliation", layout="wide")
 
-    # Brand colors
     brand_colors = {
         "primary_blue": "#0D2C71",
         "primary_green": "#00AB63",
@@ -265,22 +286,11 @@ def main():
         "white": "#FFFFFF",
     }
 
-    # Logo SVG with white text (converted from the provided logo)
-    #logo_svg = """
-    #<svg width="200" height="40" xmlns="http://www.w3.org/2000/svg">
-    #    <text x="0" y="30" font-family="Arial, sans-serif" font-size="32" font-weight="bold" fill="#FFFFFF">definian</text>
-    #    <rect x="160" y="5" width="15" height="15" fill="#00AB63" rx="3"/>
-    #    <rect x="180" y="5" width="15" height="15" fill="#00AB63" rx="3"/>
-    #</svg>
-    #"""
     logo_svg = load_svg("assets/modernization.svg")
-    #background_svg = get_base64_svg("assets/Trapz.svg")
 
-    # Expose ANTHROPIC_API_KEY from Streamlit secrets to the environment if present
     if "ANTHROPIC_API_KEY" in st.secrets:
         os.environ["ANTHROPIC_API_KEY"] = st.secrets["ANTHROPIC_API_KEY"]
 
-    # Custom CSS for brand colors, layout, and background
     st.markdown(
         f"""
         <style>
@@ -288,21 +298,19 @@ def main():
             background-color: {brand_colors['primary_blue']};
             background-attachment: fixed;
         }}
-        /* Right-side SVG container */
         .right-bg {{
             position: fixed;
             top: 0;
             right: 0;
             height: 100vh;
-            width: 50vw;                /* Only right half */
+            width: 50vw;
             display: flex;
             justify-content: flex-end;
             align-items: center;
-            pointer-events: none;       /* So it doesn't block UI */
+            pointer-events: none;
             z-index: -1;
-            opacity: 0.25;              /* Subtle overlay */
+            opacity: 0.25;
         }}
-        /* Make SVG scale nicely */
         .right-bg svg {{
             height: 80vh;
             width: auto;
@@ -310,15 +318,12 @@ def main():
         .main {{
             background-color: transparent;
         }}
-        /* Change the color of "Drag and drop..." and file size text to black */
         div[data-testid="stFileUploader"] label {{
             color: black !important;
         }}
-        /* Change the color of the text to black if you are using dark mode */
         div[data-testid="stFileUploader"] span {{
             color: black !important;
         }}
-        /* "Browse files" button */
         div[data-testid="stFileUploader"] button {{
             color: black !important;
         }}
@@ -336,7 +341,6 @@ def main():
         p, div, span, label {{
             color: {brand_colors['white']} !important;
         }}
-        /* Text on white/gray backgrounds should be black */
         div[data-baseweb="select"] > div {{
             color: #000000 !important;
         }}
@@ -348,11 +352,9 @@ def main():
             background-color: {brand_colors['white']};
             color: #000000 !important;
         }}
-        /* Make sure text in dropdown options is black */
         div[role="listbox"] div {{
             color: #000000 !important;
         }}
-        /* Results text should be white on primary_blue background */
         .stMarkdown {{
             color: {brand_colors['white']} !important;
         }}
@@ -385,11 +387,9 @@ def main():
         .stSelectbox label, .stMultiSelect label, .stNumberInput label, .stCheckbox label {{
             color: {brand_colors['white']} !important;
         }}
-        /* Make dataframe larger */
         div[data-testid="stDataFrame"] {{
             height: 600px !important;
         }}
-        /* Success/info messages */
         .stSuccess, .stInfo {{
             color: {brand_colors['white']} !important;
         }}
@@ -398,11 +398,9 @@ def main():
         unsafe_allow_html=True,
     )
 
-    # Load SVG
     with open("assets/Trapz.svg", "r") as f:
         background_svg = f.read()
 
-    # Header with logo
     st.markdown(
         f"""
         <div style="background-color: {brand_colors['primary_blue']}; padding: 1.5rem; margin: -1rem -1rem 2rem -1rem; display: flex; align-items: center; gap: 2rem;">
@@ -426,12 +424,12 @@ def main():
     if "result" not in st.session_state:
         st.session_state.result = None
     if "nlq_result" not in st.session_state:
-        st.session_state.nlq_result = None  # tuple(filtered_df | None, answer_text)
+        st.session_state.nlq_result = None
+    if "pending_profile" not in st.session_state:
+        st.session_state.pending_profile = None  # profile config waiting to be applied
 
-    # Create two columns for Upload Files and Configure sections
     col1, col2 = st.columns(2)
 
-    # Upload Files section (left column)
     with col1:
         st.markdown("### Upload Files")
         first_file = st.file_uploader(
@@ -462,7 +460,6 @@ def main():
                 st.error(f"Error reading second file: {e}")
                 st.session_state.second_df = None
 
-    # Configure section (right column)
     with col2:
         st.markdown("### Configure")
 
@@ -470,7 +467,43 @@ def main():
             first_cols = list(st.session_state.first_df.columns)
             second_cols = list(st.session_state.second_df.columns)
 
-            # Match keys
+            # ---- Load Profile ---- #
+            profiles = load_profiles()
+            if profiles:
+                st.markdown("**Load Profile**")
+                lp_col1, lp_col2 = st.columns([4, 1])
+                with lp_col1:
+                    profile_to_load = st.selectbox(
+                        "Select a saved profile",
+                        [""] + list(profiles.keys()),
+                        key="profile_selector",
+                        label_visibility="collapsed",
+                    )
+                with lp_col2:
+                    if st.button("Load", key="load_profile_btn") and profile_to_load:
+                        st.session_state.pending_profile = profiles[profile_to_load]
+                        st.rerun()
+
+            # Apply a pending profile now that columns are known
+            if st.session_state.pending_profile:
+                cfg = st.session_state.pending_profile
+                st.session_state["match_keys_first"] = [
+                    k for k in cfg.get("match_keys_first", []) if k in first_cols
+                ]
+                st.session_state["match_keys_second"] = [
+                    k for k in cfg.get("match_keys_second", []) if k in second_cols
+                ]
+                if cfg.get("compare_col_first") in first_cols:
+                    st.session_state["compare_col_first"] = cfg["compare_col_first"]
+                if cfg.get("compare_col_second") in second_cols:
+                    st.session_state["compare_col_second"] = cfg["compare_col_second"]
+                tolerance_options = ["None", "Dollar ($)", "Percentage (%)"]
+                saved_tol = cfg.get("tolerance_type", "None")
+                if saved_tol in tolerance_options:
+                    st.session_state["tolerance_type_select"] = saved_tol
+                st.session_state.pending_profile = None
+
+            # ---- Widget definitions ---- #
             st.markdown("**Match keys (first file)**")
             match_keys_first = st.multiselect(
                 "Select one or more columns",
@@ -487,7 +520,6 @@ def main():
                 label_visibility="collapsed",
             )
 
-            # Compare columns
             st.markdown("**Compare column (first file)**")
             compare_col_first = st.selectbox(
                 "Select compare column",
@@ -504,8 +536,12 @@ def main():
                 label_visibility="collapsed",
             )
 
-            # Tolerance options
-            tolerance_type = st.selectbox("Tolerance type", ["None", "Dollar ($)", "Percentage (%)"], index=0)
+            tolerance_type = st.selectbox(
+                "Tolerance type",
+                ["None", "Dollar ($)", "Percentage (%)"],
+                index=0,
+                key="tolerance_type_select",
+            )
 
             tolerance_value = None
             if tolerance_type != "None":
@@ -517,7 +553,6 @@ def main():
                     format="%.2f",
                 )
 
-            # Run comparison button
             if st.button("Run Comparison", use_container_width=False):
                 if not match_keys_first or not match_keys_second:
                     st.error("Please select match key columns for both files.")
@@ -539,19 +574,46 @@ def main():
                                 distinct_list=True,
                             )
                             st.session_state.result = result
-                            st.session_state.nlq_result = None  # reset NLQ on new comparison
+                            st.session_state.nlq_result = None
                             st.success("Comparison complete!")
                     except Exception as e:
                         st.error(f"Error during comparison: {e}")
                         st.session_state.result = None
+
+            # ---- Save Profile ---- #
+            st.markdown("---")
+            st.markdown("**Save Configuration Profile**")
+            sp_col1, sp_col2 = st.columns([4, 1])
+            with sp_col1:
+                profile_name = st.text_input(
+                    "Profile name",
+                    key="profile_name_input",
+                    placeholder="e.g. Monthly Vendor Reconciliation",
+                    label_visibility="collapsed",
+                )
+            with sp_col2:
+                if st.button("Save", key="save_profile_btn"):
+                    if not profile_name:
+                        st.error("Enter a profile name before saving.")
+                    else:
+                        save_profile(
+                            profile_name,
+                            {
+                                "match_keys_first": match_keys_first,
+                                "match_keys_second": match_keys_second,
+                                "compare_col_first": compare_col_first,
+                                "compare_col_second": compare_col_second,
+                                "tolerance_type": tolerance_type,
+                                "tolerance_value": tolerance_value,
+                            },
+                        )
+                        st.success(f"Profile \u2018{profile_name}\u2019 saved!")
         else:
             st.info("Upload both files to configure the comparison")
 
-    # Display results automatically
     if st.session_state.result:
         st.markdown("### Results")
 
-        # Display summary in white text on primary_blue background
         st.markdown(
             f"""
             <div style="background-color: {brand_colors['primary_blue']}; padding: 1rem; border-radius: 4px; margin-bottom: 1rem;">
@@ -561,7 +623,6 @@ def main():
             unsafe_allow_html=True,
         )
 
-        # Filter options for preview
         st.markdown("**Filter Results**")
         filter_col1, filter_col2 = st.columns(2)
 
@@ -571,18 +632,15 @@ def main():
         with filter_col2:
             show_matches_only = st.checkbox("Show matches only", value=False)
 
-        # Apply filters
         filtered_df = st.session_state.result.merged.copy()
         if show_differences_only and not show_matches_only:
             filtered_df = filtered_df[filtered_df["Difference"]]
         elif show_matches_only and not show_differences_only:
             filtered_df = filtered_df[~filtered_df["Difference"]]
 
-        # Show preview with larger size
         st.markdown(f"**Preview Results ({len(filtered_df)} rows)**")
         st.dataframe(filtered_df, use_container_width=True, height=600)
 
-        # Generate Excel file for download with custom filename support
         st.markdown("**Download Options**")
         download_filename = st.text_input(
             "File name for download",
@@ -590,26 +648,21 @@ def main():
             help="Enter the desired filename (must end with .xlsx)",
         )
 
-        # Ensure filename ends with .xlsx
         if not download_filename.endswith(".xlsx"):
             download_filename += ".xlsx"
 
-        # Create Excel file in memory
         output_buffer = BytesIO()
         filtered_df.to_excel(output_buffer, index=False)
         output_buffer.seek(0)
 
-        # Load and format the Excel file
         temp_filename = "temp_reconciliation_results.xlsx"
         with open(temp_filename, "wb") as f:
             f.write(output_buffer.getvalue())
         _format_output(temp_filename, filtered_df)
 
-        # Read the formatted file for download
         with open(temp_filename, "rb") as f:
             excel_data = f.read()
 
-        # Provide download button
         st.download_button(
             label="Download Results",
             data=excel_data,
@@ -625,7 +678,7 @@ def main():
         st.markdown("### Ask a Question About the Results")
         st.markdown(
             "Query the reconciliation data in plain English. "
-            "*Examples: \"Show me any differences over 5%\" &nbsp;·&nbsp; "
+            "*Examples: \"Show me any differences over 5%\" &nbsp;\u00b7&nbsp; "
             "\"Can you show me any records for Supplier ACME Widgets\"*"
         )
 
