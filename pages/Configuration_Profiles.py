@@ -41,6 +41,9 @@ st.markdown(
     .stApp {{
         background-color: {brand_colors['midnight']};
     }}
+    .block-container {{
+        padding-top: 0rem !important;
+    }}
     div[data-testid="stHeader"] {{
         background-color: {brand_colors['midnight']};
     }}
