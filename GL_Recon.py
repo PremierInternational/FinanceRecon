@@ -305,6 +305,9 @@ def main():
             background-color: {brand_colors['midnight']};
             background-attachment: fixed;
         }}
+        .block-container {{
+            padding-top: 0rem !important;
+        }}
         .right-bg {{
             position: fixed;
             top: 0;
