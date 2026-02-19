@@ -348,18 +348,29 @@ def main():
         p, div, span, label {{
             color: {brand_colors['white']} !important;
         }}
+        /* Sidebar navigation background */
+        section[data-testid="stSidebar"],
+        section[data-testid="stSidebar"] > div {{
+            background-color: #3C405B !important;
+        }}
         /* Dropdowns and selects - force black text on white backgrounds */
+        div[data-baseweb="select"] *,
         div[data-baseweb="select"] span,
         div[data-baseweb="select"] div,
         div[data-baseweb="select"] input {{
             color: #000000 !important;
         }}
+        div[data-baseweb="select"] > div {{
+            background-color: #ffffff !important;
+        }}
         /* Multiselect tags */
         span[data-baseweb="tag"],
+        span[data-baseweb="tag"] *,
         span[data-baseweb="tag"] span {{
             color: #000000 !important;
         }}
         /* Dropdown option list */
+        div[role="listbox"] *,
         div[role="listbox"] div,
         div[role="option"] div,
         div[role="option"] span {{
