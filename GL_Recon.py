@@ -8,7 +8,7 @@ to an Excel file and displayed on screen.
 import base64
 import json
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from io import BytesIO
 
 import anthropic
@@ -25,6 +25,9 @@ class ComparisonResult:
 
     merged: pd.DataFrame
     summary_text: str
+    total_records: int = 0
+    matched_records: int = 0
+    match_percentage: float = 0.0
 
 
 def load_profiles() -> dict:
@@ -186,19 +189,25 @@ def compare_data(
 
     total_records = len(merged_df)
     matched_records = len(merged_df[~merged_df["Difference"]])
-    matched_percentage = (matched_records / total_records) * 100 if total_records else 0
+    match_percentage = (matched_records / total_records) * 100 if total_records else 0
 
     summary_lines = [
         f"Total records: {total_records}",
         f"Matched records: {matched_records}",
-        f"Match percentage: {matched_percentage:.2f}%",
+        f"Match percentage: {match_percentage:.2f}%",
     ]
 
     if output_file:
         merged_df.to_excel(output_file, index=False)
         _format_output(output_file, merged_df)
 
-    return ComparisonResult(merged_df, "\n".join(summary_lines))
+    return ComparisonResult(
+        merged_df,
+        "\n".join(summary_lines),
+        total_records=total_records,
+        matched_records=matched_records,
+        match_percentage=match_percentage,
+    )
 
 
 def _format_output(output_file: str, merged_df: pd.DataFrame) -> None:
@@ -661,12 +670,53 @@ def main():
             st.info("Upload both files to configure the comparison")
 
     if st.session_state.result:
+        result = st.session_state.result
         st.markdown("### Results")
 
+        # ------------------------------------------------------------------ #
+        # Prominent metric cards
+        # ------------------------------------------------------------------ #
+        unmatched = result.total_records - result.matched_records
+        pct = result.match_percentage
+        pct_color = (
+            brand_colors["primary_green"] if pct >= 95
+            else ("#FFA500" if pct >= 75 else "#FF4444")
+        )
         st.markdown(
             f"""
-            <div style="background-color: {brand_colors['midnight']}; padding: 1rem; border-radius: 4px; margin-bottom: 1rem;">
-                <pre style="color: {brand_colors['white']}; margin: 0; font-family: monospace;">{st.session_state.result.summary_text}</pre>
+            <div style="display: flex; gap: 1rem; margin-bottom: 1.5rem;">
+                <div style="flex: 1; background: linear-gradient(135deg, #112563, {brand_colors['primary_blue']}); \
+border-radius: 10px; padding: 1.5rem 1rem; text-align: center; \
+border-top: 4px solid {brand_colors['cool_gray']};">
+                    <div style="font-size: 0.75rem; color: {brand_colors['cool_gray']}; \
+text-transform: uppercase; letter-spacing: 1.5px; margin-bottom: 0.6rem;">Total Records</div>
+                    <div style="font-size: 2.8rem; font-weight: 800; \
+color: {brand_colors['white']}; line-height: 1;">{result.total_records:,}</div>
+                </div>
+                <div style="flex: 1; background: linear-gradient(135deg, #112563, {brand_colors['primary_blue']}); \
+border-radius: 10px; padding: 1.5rem 1rem; text-align: center; \
+border-top: 4px solid {brand_colors['primary_green']};">
+                    <div style="font-size: 0.75rem; color: {brand_colors['cool_gray']}; \
+text-transform: uppercase; letter-spacing: 1.5px; margin-bottom: 0.6rem;">Matched</div>
+                    <div style="font-size: 2.8rem; font-weight: 800; \
+color: {brand_colors['primary_green']}; line-height: 1;">{result.matched_records:,}</div>
+                </div>
+                <div style="flex: 1; background: linear-gradient(135deg, #112563, {brand_colors['primary_blue']}); \
+border-radius: 10px; padding: 1.5rem 1rem; text-align: center; \
+border-top: 4px solid #FF4444;">
+                    <div style="font-size: 0.75rem; color: {brand_colors['cool_gray']}; \
+text-transform: uppercase; letter-spacing: 1.5px; margin-bottom: 0.6rem;">Unmatched</div>
+                    <div style="font-size: 2.8rem; font-weight: 800; \
+color: #FF4444; line-height: 1;">{unmatched:,}</div>
+                </div>
+                <div style="flex: 1; background: linear-gradient(135deg, #112563, {brand_colors['primary_blue']}); \
+border-radius: 10px; padding: 1.5rem 1rem; text-align: center; \
+border-top: 4px solid {pct_color};">
+                    <div style="font-size: 0.75rem; color: {brand_colors['cool_gray']}; \
+text-transform: uppercase; letter-spacing: 1.5px; margin-bottom: 0.6rem;">Match Rate</div>
+                    <div style="font-size: 2.8rem; font-weight: 800; \
+color: {pct_color}; line-height: 1;">{pct:.1f}%</div>
+                </div>
             </div>
             """,
             unsafe_allow_html=True,
@@ -704,7 +754,7 @@ def main():
             else:
                 with st.spinner("Analysing your question..."):
                     nlq_df, nlq_answer = query_results_with_nlq(
-                        st.session_state.result.merged, nlq_question
+                        result.merged, nlq_question
                     )
                 st.session_state.nlq_result = (nlq_df, nlq_answer)
 
@@ -736,7 +786,7 @@ def main():
         with filter_col2:
             show_matches_only = st.checkbox("Show matches only", value=False)
 
-        filtered_df = st.session_state.result.merged.copy()
+        filtered_df = result.merged.copy()
         if show_differences_only and not show_matches_only:
             filtered_df = filtered_df[filtered_df["Difference"]]
         elif show_matches_only and not show_differences_only:
