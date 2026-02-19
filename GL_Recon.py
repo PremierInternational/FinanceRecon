@@ -545,6 +545,8 @@ def main():
                 saved_tol = cfg.get("tolerance_type", "None")
                 if saved_tol in tolerance_options:
                     st.session_state["tolerance_type_select"] = saved_tol
+                if cfg.get("tolerance_value") is not None:
+                    st.session_state["tolerance_value_input"] = float(cfg["tolerance_value"])
                 st.session_state.pending_profile = None
 
             st.markdown("**Match keys (first file)**")
@@ -594,6 +596,7 @@ def main():
                     value=0.0,
                     step=0.01,
                     format="%.2f",
+                    key="tolerance_value_input",
                 )
 
             if st.button("Run Comparison", use_container_width=False):
