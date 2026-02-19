@@ -225,9 +225,13 @@ def load_svg(path):
 
 
 def query_results_with_nlq(df: pd.DataFrame, question: str) -> tuple[pd.DataFrame | None, str]:
-    """Use Claude to interpret a natural language question and filter or summarise the dataframe."""
+    """Use Claude to interpret a natural language question and filter or summarise the dataframe.
+
+    Sends the complete dataset to Claude so it can answer specific value lookups
+    and compute accurate summary statistics.
+    """
     schema = "\n".join(f"- {col} (dtype: {df[col].dtype})" for col in df.columns)
-    sample = df.head(5).to_string(index=False)
+    full_data = df.to_csv(index=False)
 
     client = anthropic.Anthropic()
     message = client.messages.create(
@@ -235,13 +239,16 @@ def query_results_with_nlq(df: pd.DataFrame, question: str) -> tuple[pd.DataFram
         max_tokens=512,
         system=(
             "You are a data analyst assistant helping users query a pandas DataFrame of "
-            "financial reconciliation results. When given a question, respond in one of two ways:\n\n"
+            "financial reconciliation results. You have access to the complete dataset. "
+            "When given a question, respond in one of two ways:\n\n"
             "1. If the question can be answered by filtering rows, respond with ONLY a valid "
             "Python boolean expression using the variable `df` "
-            "(e.g. `df['Difference'] == True` or `df['Percentage Difference'].abs() > 0.05`). "
+            "(e.g. `df['Difference'] == True` or `df['Percentage Difference'].abs() > 0.05` "
+            "or `df['Comparison Key'].str.contains('ACME', case=False)`). "
             "Do not include any explanation \u2014 just the expression.\n\n"
             "2. If the question asks for a count, summary, or cannot be answered by a simple "
-            "row filter, respond with a plain-English answer prefixed with exactly 'ANSWER: '.\n\n"
+            "row filter, respond with a plain-English answer prefixed with exactly 'ANSWER: '. "
+            "You may compute counts or sums from the provided data to answer summary questions.\n\n"
             "Column names must match the schema exactly, including spaces and capitalisation."
         ),
         messages=[
@@ -249,7 +256,7 @@ def query_results_with_nlq(df: pd.DataFrame, question: str) -> tuple[pd.DataFram
                 "role": "user",
                 "content": (
                     f"DataFrame schema:\n{schema}\n\n"
-                    f"Sample data (first 5 rows):\n{sample}\n\n"
+                    f"Complete data (CSV format):\n{full_data}\n\n"
                     f"Question: {question}"
                 ),
             }
@@ -416,7 +423,6 @@ def main():
         unsafe_allow_html=True,
     )
 
-    # Initialize session state
     if "first_df" not in st.session_state:
         st.session_state.first_df = None
     if "second_df" not in st.session_state:
@@ -426,7 +432,7 @@ def main():
     if "nlq_result" not in st.session_state:
         st.session_state.nlq_result = None
     if "pending_profile" not in st.session_state:
-        st.session_state.pending_profile = None  # profile config waiting to be applied
+        st.session_state.pending_profile = None
 
     col1, col2 = st.columns(2)
 
@@ -623,56 +629,8 @@ def main():
             unsafe_allow_html=True,
         )
 
-        st.markdown("**Filter Results**")
-        filter_col1, filter_col2 = st.columns(2)
-
-        with filter_col1:
-            show_differences_only = st.checkbox("Show differences only", value=False)
-
-        with filter_col2:
-            show_matches_only = st.checkbox("Show matches only", value=False)
-
-        filtered_df = st.session_state.result.merged.copy()
-        if show_differences_only and not show_matches_only:
-            filtered_df = filtered_df[filtered_df["Difference"]]
-        elif show_matches_only and not show_differences_only:
-            filtered_df = filtered_df[~filtered_df["Difference"]]
-
-        st.markdown(f"**Preview Results ({len(filtered_df)} rows)**")
-        st.dataframe(filtered_df, use_container_width=True, height=600)
-
-        st.markdown("**Download Options**")
-        download_filename = st.text_input(
-            "File name for download",
-            value="reconciliation_results.xlsx",
-            help="Enter the desired filename (must end with .xlsx)",
-        )
-
-        if not download_filename.endswith(".xlsx"):
-            download_filename += ".xlsx"
-
-        output_buffer = BytesIO()
-        filtered_df.to_excel(output_buffer, index=False)
-        output_buffer.seek(0)
-
-        temp_filename = "temp_reconciliation_results.xlsx"
-        with open(temp_filename, "wb") as f:
-            f.write(output_buffer.getvalue())
-        _format_output(temp_filename, filtered_df)
-
-        with open(temp_filename, "rb") as f:
-            excel_data = f.read()
-
-        st.download_button(
-            label="Download Results",
-            data=excel_data,
-            file_name=download_filename,
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            use_container_width=False,
-        )
-
         # ------------------------------------------------------------------ #
-        # Natural Language Query section
+        # Natural Language Query section (above Preview Results)
         # ------------------------------------------------------------------ #
         st.markdown("---")
         st.markdown("### Ask a Question About the Results")
@@ -721,6 +679,58 @@ def main():
             )
             if nlq_df is not None:
                 st.dataframe(nlq_df, use_container_width=True, height=400)
+
+        # ------------------------------------------------------------------ #
+        # Filter + Preview Results
+        # ------------------------------------------------------------------ #
+        st.markdown("---")
+        st.markdown("**Filter Results**")
+        filter_col1, filter_col2 = st.columns(2)
+
+        with filter_col1:
+            show_differences_only = st.checkbox("Show differences only", value=False)
+
+        with filter_col2:
+            show_matches_only = st.checkbox("Show matches only", value=False)
+
+        filtered_df = st.session_state.result.merged.copy()
+        if show_differences_only and not show_matches_only:
+            filtered_df = filtered_df[filtered_df["Difference"]]
+        elif show_matches_only and not show_differences_only:
+            filtered_df = filtered_df[~filtered_df["Difference"]]
+
+        st.markdown(f"**Preview Results ({len(filtered_df)} rows)**")
+        st.dataframe(filtered_df, use_container_width=True, height=600)
+
+        st.markdown("**Download Options**")
+        download_filename = st.text_input(
+            "File name for download",
+            value="reconciliation_results.xlsx",
+            help="Enter the desired filename (must end with .xlsx)",
+        )
+
+        if not download_filename.endswith(".xlsx"):
+            download_filename += ".xlsx"
+
+        output_buffer = BytesIO()
+        filtered_df.to_excel(output_buffer, index=False)
+        output_buffer.seek(0)
+
+        temp_filename = "temp_reconciliation_results.xlsx"
+        with open(temp_filename, "wb") as f:
+            f.write(output_buffer.getvalue())
+        _format_output(temp_filename, filtered_df)
+
+        with open(temp_filename, "rb") as f:
+            excel_data = f.read()
+
+        st.download_button(
+            label="Download Results",
+            data=excel_data,
+            file_name=download_filename,
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            use_container_width=False,
+        )
 
 
 if __name__ == "__main__":
