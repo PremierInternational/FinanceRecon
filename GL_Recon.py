@@ -200,11 +200,12 @@ def load_svg(path):
 def query_results_with_nlq(df: pd.DataFrame, question: str) -> tuple[pd.DataFrame | None, str]:
     """Use Claude to interpret a natural language question and filter or summarise the dataframe.
 
-    Returns a (filtered_df, answer_text) tuple. filtered_df is None when Claude returns a
-    direct text answer rather than a row filter.
+    Sends the complete dataset to Claude so it can answer specific value lookups
+    and compute accurate summary statistics. Returns a (filtered_df, answer_text)
+    tuple. filtered_df is None when Claude returns a direct text answer.
     """
     schema = "\n".join(f"- {col} (dtype: {df[col].dtype})" for col in df.columns)
-    sample = df.head(5).to_string(index=False)
+    full_data = df.to_csv(index=False)
 
     client = anthropic.Anthropic()
     message = client.messages.create(
@@ -212,13 +213,16 @@ def query_results_with_nlq(df: pd.DataFrame, question: str) -> tuple[pd.DataFram
         max_tokens=512,
         system=(
             "You are a data analyst assistant helping users query a pandas DataFrame of "
-            "financial reconciliation results. When given a question, respond in one of two ways:\n\n"
+            "financial reconciliation results. You have access to the complete dataset. "
+            "When given a question, respond in one of two ways:\n\n"
             "1. If the question can be answered by filtering rows, respond with ONLY a valid "
             "Python boolean expression using the variable `df` "
-            "(e.g. `df['Difference'] == True` or `df['Percentage Difference'].abs() > 0.05`). "
-            "Do not include any explanation — just the expression.\n\n"
+            "(e.g. `df['Difference'] == True` or `df['Percentage Difference'].abs() > 0.05` "
+            "or `df['Comparison Key'].str.contains('ACME', case=False)`). "
+            "Do not include any explanation \u2014 just the expression.\n\n"
             "2. If the question asks for a count, summary, or cannot be answered by a simple "
-            "row filter, respond with a plain-English answer prefixed with exactly 'ANSWER: '.\n\n"
+            "row filter, respond with a plain-English answer prefixed with exactly 'ANSWER: '. "
+            "You may compute counts or sums from the provided data to answer summary questions.\n\n"
             "Column names must match the schema exactly, including spaces and capitalisation."
         ),
         messages=[
@@ -226,7 +230,7 @@ def query_results_with_nlq(df: pd.DataFrame, question: str) -> tuple[pd.DataFram
                 "role": "user",
                 "content": (
                     f"DataFrame schema:\n{schema}\n\n"
-                    f"Sample data (first 5 rows):\n{sample}\n\n"
+                    f"Complete data (CSV format):\n{full_data}\n\n"
                     f"Question: {question}"
                 ),
             }
@@ -265,16 +269,7 @@ def main():
         "white": "#FFFFFF",
     }
 
-    # Logo SVG with white text (converted from the provided logo)
-    #logo_svg = """
-    #<svg width="200" height="40" xmlns="http://www.w3.org/2000/svg">
-    #    <text x="0" y="30" font-family="Arial, sans-serif" font-size="32" font-weight="bold" fill="#FFFFFF">definian</text>
-    #    <rect x="160" y="5" width="15" height="15" fill="#00AB63" rx="3"/>
-    #    <rect x="180" y="5" width="15" height="15" fill="#00AB63" rx="3"/>
-    #</svg>
-    #"""
     logo_svg = load_svg("assets/modernization.svg")
-    #background_svg = get_base64_svg("assets/Trapz.svg")
 
     # Expose ANTHROPIC_API_KEY from Streamlit secrets to the environment if present
     if "ANTHROPIC_API_KEY" in st.secrets:
@@ -288,21 +283,19 @@ def main():
             background-color: {brand_colors['primary_blue']};
             background-attachment: fixed;
         }}
-        /* Right-side SVG container */
         .right-bg {{
             position: fixed;
             top: 0;
             right: 0;
             height: 100vh;
-            width: 50vw;                /* Only right half */
+            width: 50vw;
             display: flex;
             justify-content: flex-end;
             align-items: center;
-            pointer-events: none;       /* So it doesn't block UI */
+            pointer-events: none;
             z-index: -1;
-            opacity: 0.25;              /* Subtle overlay */
+            opacity: 0.25;
         }}
-        /* Make SVG scale nicely */
         .right-bg svg {{
             height: 80vh;
             width: auto;
@@ -310,15 +303,12 @@ def main():
         .main {{
             background-color: transparent;
         }}
-        /* Change the color of "Drag and drop..." and file size text to black */
         div[data-testid="stFileUploader"] label {{
             color: black !important;
         }}
-        /* Change the color of the text to black if you are using dark mode */
         div[data-testid="stFileUploader"] span {{
             color: black !important;
         }}
-        /* "Browse files" button */
         div[data-testid="stFileUploader"] button {{
             color: black !important;
         }}
@@ -336,7 +326,6 @@ def main():
         p, div, span, label {{
             color: {brand_colors['white']} !important;
         }}
-        /* Text on white/gray backgrounds should be black */
         div[data-baseweb="select"] > div {{
             color: #000000 !important;
         }}
@@ -348,11 +337,9 @@ def main():
             background-color: {brand_colors['white']};
             color: #000000 !important;
         }}
-        /* Make sure text in dropdown options is black */
         div[role="listbox"] div {{
             color: #000000 !important;
         }}
-        /* Results text should be white on primary_blue background */
         .stMarkdown {{
             color: {brand_colors['white']} !important;
         }}
@@ -385,11 +372,9 @@ def main():
         .stSelectbox label, .stMultiSelect label, .stNumberInput label, .stCheckbox label {{
             color: {brand_colors['white']} !important;
         }}
-        /* Make dataframe larger */
         div[data-testid="stDataFrame"] {{
             height: 600px !important;
         }}
-        /* Success/info messages */
         .stSuccess, .stInfo {{
             color: {brand_colors['white']} !important;
         }}
@@ -426,7 +411,7 @@ def main():
     if "result" not in st.session_state:
         st.session_state.result = None
     if "nlq_result" not in st.session_state:
-        st.session_state.nlq_result = None  # tuple(filtered_df | None, answer_text)
+        st.session_state.nlq_result = None
 
     # Create two columns for Upload Files and Configure sections
     col1, col2 = st.columns(2)
@@ -470,7 +455,6 @@ def main():
             first_cols = list(st.session_state.first_df.columns)
             second_cols = list(st.session_state.second_df.columns)
 
-            # Match keys
             st.markdown("**Match keys (first file)**")
             match_keys_first = st.multiselect(
                 "Select one or more columns",
@@ -487,7 +471,6 @@ def main():
                 label_visibility="collapsed",
             )
 
-            # Compare columns
             st.markdown("**Compare column (first file)**")
             compare_col_first = st.selectbox(
                 "Select compare column",
@@ -504,7 +487,6 @@ def main():
                 label_visibility="collapsed",
             )
 
-            # Tolerance options
             tolerance_type = st.selectbox("Tolerance type", ["None", "Dollar ($)", "Percentage (%)"], index=0)
 
             tolerance_value = None
@@ -517,7 +499,6 @@ def main():
                     format="%.2f",
                 )
 
-            # Run comparison button
             if st.button("Run Comparison", use_container_width=False):
                 if not match_keys_first or not match_keys_second:
                     st.error("Please select match key columns for both files.")
@@ -539,7 +520,7 @@ def main():
                                 distinct_list=True,
                             )
                             st.session_state.result = result
-                            st.session_state.nlq_result = None  # reset NLQ on new comparison
+                            st.session_state.nlq_result = None
                             st.success("Comparison complete!")
                     except Exception as e:
                         st.error(f"Error during comparison: {e}")
@@ -547,11 +528,11 @@ def main():
         else:
             st.info("Upload both files to configure the comparison")
 
-    # Display results automatically
+    # Display results
     if st.session_state.result:
         st.markdown("### Results")
 
-        # Display summary in white text on primary_blue background
+        # Summary panel
         st.markdown(
             f"""
             <div style="background-color: {brand_colors['primary_blue']}; padding: 1rem; border-radius: 4px; margin-bottom: 1rem;">
@@ -561,71 +542,14 @@ def main():
             unsafe_allow_html=True,
         )
 
-        # Filter options for preview
-        st.markdown("**Filter Results**")
-        filter_col1, filter_col2 = st.columns(2)
-
-        with filter_col1:
-            show_differences_only = st.checkbox("Show differences only", value=False)
-
-        with filter_col2:
-            show_matches_only = st.checkbox("Show matches only", value=False)
-
-        # Apply filters
-        filtered_df = st.session_state.result.merged.copy()
-        if show_differences_only and not show_matches_only:
-            filtered_df = filtered_df[filtered_df["Difference"]]
-        elif show_matches_only and not show_differences_only:
-            filtered_df = filtered_df[~filtered_df["Difference"]]
-
-        # Show preview with larger size
-        st.markdown(f"**Preview Results ({len(filtered_df)} rows)**")
-        st.dataframe(filtered_df, use_container_width=True, height=600)
-
-        # Generate Excel file for download with custom filename support
-        st.markdown("**Download Options**")
-        download_filename = st.text_input(
-            "File name for download",
-            value="reconciliation_results.xlsx",
-            help="Enter the desired filename (must end with .xlsx)",
-        )
-
-        # Ensure filename ends with .xlsx
-        if not download_filename.endswith(".xlsx"):
-            download_filename += ".xlsx"
-
-        # Create Excel file in memory
-        output_buffer = BytesIO()
-        filtered_df.to_excel(output_buffer, index=False)
-        output_buffer.seek(0)
-
-        # Load and format the Excel file
-        temp_filename = "temp_reconciliation_results.xlsx"
-        with open(temp_filename, "wb") as f:
-            f.write(output_buffer.getvalue())
-        _format_output(temp_filename, filtered_df)
-
-        # Read the formatted file for download
-        with open(temp_filename, "rb") as f:
-            excel_data = f.read()
-
-        # Provide download button
-        st.download_button(
-            label="Download Results",
-            data=excel_data,
-            file_name=download_filename,
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            use_container_width=False,
-        )
-
         # ------------------------------------------------------------------ #
-        # Natural Language Query section
+        # Natural Language Query section (above Preview Results)
         # ------------------------------------------------------------------ #
         st.markdown("---")
         st.markdown("### Ask a Question About the Results")
         st.markdown(
             "Query the reconciliation data in plain English. "
-            "*Examples: \"Show me any differences over 5%\" &nbsp;·&nbsp; "
+            "*Examples: \"Show me any differences over 5%\" &nbsp;\u00b7&nbsp; "
             "\"Can you show me any records for Supplier ACME Widgets\"*"
         )
 
@@ -668,6 +592,59 @@ def main():
             )
             if nlq_df is not None:
                 st.dataframe(nlq_df, use_container_width=True, height=400)
+
+        # ------------------------------------------------------------------ #
+        # Filter + Preview Results
+        # ------------------------------------------------------------------ #
+        st.markdown("---")
+        st.markdown("**Filter Results**")
+        filter_col1, filter_col2 = st.columns(2)
+
+        with filter_col1:
+            show_differences_only = st.checkbox("Show differences only", value=False)
+
+        with filter_col2:
+            show_matches_only = st.checkbox("Show matches only", value=False)
+
+        filtered_df = st.session_state.result.merged.copy()
+        if show_differences_only and not show_matches_only:
+            filtered_df = filtered_df[filtered_df["Difference"]]
+        elif show_matches_only and not show_differences_only:
+            filtered_df = filtered_df[~filtered_df["Difference"]]
+
+        st.markdown(f"**Preview Results ({len(filtered_df)} rows)**")
+        st.dataframe(filtered_df, use_container_width=True, height=600)
+
+        # Download Options
+        st.markdown("**Download Options**")
+        download_filename = st.text_input(
+            "File name for download",
+            value="reconciliation_results.xlsx",
+            help="Enter the desired filename (must end with .xlsx)",
+        )
+
+        if not download_filename.endswith(".xlsx"):
+            download_filename += ".xlsx"
+
+        output_buffer = BytesIO()
+        filtered_df.to_excel(output_buffer, index=False)
+        output_buffer.seek(0)
+
+        temp_filename = "temp_reconciliation_results.xlsx"
+        with open(temp_filename, "wb") as f:
+            f.write(output_buffer.getvalue())
+        _format_output(temp_filename, filtered_df)
+
+        with open(temp_filename, "rb") as f:
+            excel_data = f.read()
+
+        st.download_button(
+            label="Download Results",
+            data=excel_data,
+            file_name=download_filename,
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            use_container_width=False,
+        )
 
 
 if __name__ == "__main__":
