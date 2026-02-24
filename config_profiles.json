@@ -10,5 +10,19 @@
     "compare_col_second": "CREDIT",
     "tolerance_type": "Dollar ($)",
     "tolerance_value": 100.0
+  },
+  "Test 1": {
+    "match_keys_first": [
+      "Account_Code",
+      "Department"
+    ],
+    "match_keys_second": [
+      "Account_Code",
+      "Department"
+    ],
+    "compare_col_first": "Amount",
+    "compare_col_second": "Amount",
+    "tolerance_type": "Dollar ($)",
+    "tolerance_value": 20.0
   }
 }

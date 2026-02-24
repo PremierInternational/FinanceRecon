@@ -1,0 +1,16 @@
+{
+  "Test Profile": {
+    "match_keys_first": [
+      "Department",
+      "Account_Code"
+    ],
+    "match_keys_second": [
+      "Department",
+      "Account_Code"
+    ],
+    "compare_col_first": "Amount",
+    "compare_col_second": "Amount",
+    "tolerance_type": "Dollar ($)",
+    "tolerance_value": 20
+  }
+}
