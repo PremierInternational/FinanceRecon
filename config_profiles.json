@@ -1,0 +1,14 @@
+{
+  "Test1": {
+    "match_keys_first": [
+      "BUSINESS_UNIT"
+    ],
+    "match_keys_second": [
+      "BUSINESS_UNIT"
+    ],
+    "compare_col_first": "CREDIT",
+    "compare_col_second": "CREDIT",
+    "tolerance_type": "Dollar ($)",
+    "tolerance_value": 100.0
+  }
+}

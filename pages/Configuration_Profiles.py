@@ -6,8 +6,12 @@ Profiles are saved from the main Reconciliation page.
 
 import json
 import os
+import sys
 
 import streamlit as st
+
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+from utils import apply_global_styles, render_header
 
 PROFILES_FILE = "config_profiles.json"
 
@@ -28,55 +32,9 @@ def delete_profile(name: str) -> None:
 
 st.set_page_config(page_title="Configuration Profiles", layout="wide")
 
-brand_colors = {
-    "primary_blue": "#0D2C71",
-    "primary_green": "#00AB63",
-    "midnight": "#02072D",
-    "white": "#FFFFFF",
-}
+apply_global_styles()
+render_header("Configuration Profiles")
 
-st.markdown(
-    f"""
-    <style>
-    .stApp {{
-        background-color: {brand_colors['midnight']};
-    }}
-    .block-container {{
-        padding-top: 0rem !important;
-    }}
-    div[data-testid="stHeader"] {{
-        background-color: {brand_colors['midnight']};
-    }}
-    h1, h2, h3, h4, h5, h6 {{
-        color: {brand_colors['white']} !important;
-    }}
-    p, div, span, label {{
-        color: {brand_colors['white']} !important;
-    }}
-    .stMarkdown {{
-        color: {brand_colors['white']} !important;
-    }}
-    .stButton>button {{
-        background-color: {brand_colors['primary_blue']};
-        color: {brand_colors['white']};
-        border: 1px solid {brand_colors['white']};
-        border-radius: 4px;
-        padding: 0.25rem 0.75rem;
-        font-weight: bold;
-    }}
-    .stButton>button:hover {{
-        background-color: #c0392b;
-        border-color: #c0392b;
-    }}
-    .stInfo {{
-        color: {brand_colors['white']} !important;
-    }}
-    </style>
-    """,
-    unsafe_allow_html=True,
-)
-
-st.markdown("## Configuration Profiles")
 st.markdown("Saved profiles can be loaded from the **Reconciliation** page via the Load Profile dropdown.")
 
 profiles = load_profiles()
