@@ -8,13 +8,16 @@ to an Excel file and displayed on screen.
 import base64
 import json
 import os
-from dataclasses import dataclass
+import tkinter as tk
+from dataclasses import dataclass, field
 from io import BytesIO
+from tkinter import filedialog
 
-import anthropic
 import pandas as pd
 import streamlit as st
 from openpyxl import load_workbook
+
+from utils import BRAND_COLORS, apply_global_styles, render_header
 
 PROFILES_FILE = "config_profiles.json"
 
@@ -25,6 +28,9 @@ class ComparisonResult:
 
     merged: pd.DataFrame
     summary_text: str
+    total_records: int = 0
+    matched_records: int = 0
+    match_percentage: float = 0.0
 
 
 def load_profiles() -> dict:
@@ -86,6 +92,10 @@ def compare_data(
     legacy[comparison_key] = _build_comparison_key(legacy, pk_legacy)
     converted[comparison_key] = _build_comparison_key(converted, pk_converted)
 
+    # Convert value columns to numeric now that key columns have been captured as strings
+    legacy[match_col_legacy] = pd.to_numeric(legacy[match_col_legacy], errors="coerce")
+    converted[match_col_converted] = pd.to_numeric(converted[match_col_converted], errors="coerce")
+
     if distinct_list:
         legacy = (
             legacy.groupby(comparison_key, dropna=False)
@@ -128,7 +138,7 @@ def compare_data(
         if tolerance_type == "Percentage (%)":
             if tolerance_value is None or legacy_val == 0:
                 return legacy_val != conv_val
-            return abs((legacy_val - conv_val) / legacy_val) > tolerance_value
+            return abs((legacy_val - conv_val) / legacy_val) > tolerance_value / 100
         return legacy_val != conv_val
 
     merged_df["Difference"] = merged_df.apply(_difference, axis=1)
@@ -186,19 +196,25 @@ def compare_data(
 
     total_records = len(merged_df)
     matched_records = len(merged_df[~merged_df["Difference"]])
-    matched_percentage = (matched_records / total_records) * 100 if total_records else 0
+    match_percentage = (matched_records / total_records) * 100 if total_records else 0
 
     summary_lines = [
         f"Total records: {total_records}",
         f"Matched records: {matched_records}",
-        f"Match percentage: {matched_percentage:.2f}%",
+        f"Match percentage: {match_percentage:.2f}%",
     ]
 
     if output_file:
         merged_df.to_excel(output_file, index=False)
         _format_output(output_file, merged_df)
 
-    return ComparisonResult(merged_df, "\n".join(summary_lines))
+    return ComparisonResult(
+        merged_df,
+        "\n".join(summary_lines),
+        total_records=total_records,
+        matched_records=matched_records,
+        match_percentage=match_percentage,
+    )
 
 
 def _format_output(output_file: str, merged_df: pd.DataFrame) -> None:
@@ -219,61 +235,6 @@ def _format_output(output_file: str, merged_df: pd.DataFrame) -> None:
     workbook.save(output_file)
 
 
-def load_svg(path):
-    with open(path, "r") as f:
-        return f.read()
-
-
-def query_results_with_nlq(df: pd.DataFrame, question: str) -> tuple[pd.DataFrame | None, str]:
-    """Use Claude to interpret a natural language question and filter or summarise the dataframe.
-
-    Sends the complete dataset to Claude so it can answer specific value lookups
-    and compute accurate summary statistics.
-    """
-    schema = "\n".join(f"- {col} (dtype: {df[col].dtype})" for col in df.columns)
-    full_data = df.to_csv(index=False)
-
-    client = anthropic.Anthropic()
-    message = client.messages.create(
-        model="claude-haiku-4-5-20251001",
-        max_tokens=512,
-        system=(
-            "You are a data analyst assistant helping users query a pandas DataFrame of "
-            "financial reconciliation results. You have access to the complete dataset. "
-            "When given a question, respond in one of two ways:\n\n"
-            "1. If the question can be answered by filtering rows, respond with ONLY a valid "
-            "Python boolean expression using the variable `df` "
-            "(e.g. `df['Difference'] == True` or `df['Percentage Difference'].abs() > 0.05` "
-            "or `df['Comparison Key'].str.contains('ACME', case=False)`). "
-            "Do not include any explanation \u2014 just the expression.\n\n"
-            "2. If the question asks for a count, summary, or cannot be answered by a simple "
-            "row filter, respond with a plain-English answer prefixed with exactly 'ANSWER: '. "
-            "You may compute counts or sums from the provided data to answer summary questions.\n\n"
-            "Column names must match the schema exactly, including spaces and capitalisation."
-        ),
-        messages=[
-            {
-                "role": "user",
-                "content": (
-                    f"DataFrame schema:\n{schema}\n\n"
-                    f"Complete data (CSV format):\n{full_data}\n\n"
-                    f"Question: {question}"
-                ),
-            }
-        ],
-    )
-
-    response = message.content[0].text.strip()
-
-    if response.startswith("ANSWER:"):
-        return None, response[7:].strip()
-
-    try:
-        mask = eval(response, {"__builtins__": {}}, {"df": df, "pd": pd})  # noqa: S307
-        filtered = df[mask].reset_index(drop=True)
-        return filtered, f"Found {len(filtered)} record(s) matching your query."
-    except Exception as exc:
-        return None, f"I couldn't apply that filter: {exc}"
 
 
 #def get_base64_svg(path):
@@ -285,181 +246,10 @@ def main():
 
     st.set_page_config(page_title="Reconciliation", layout="wide")
 
-    brand_colors = {
-        "primary_blue": "#0D2C71",
-        "primary_green": "#00AB63",
-        "midnight": "#02072D",
-        "cool_gray": "#D8D7EE",
-        "white": "#FFFFFF",
-    }
+    brand_colors = BRAND_COLORS
 
-    logo_svg = load_svg("assets/modernization.svg")
-
-    if "ANTHROPIC_API_KEY" in st.secrets:
-        os.environ["ANTHROPIC_API_KEY"] = st.secrets["ANTHROPIC_API_KEY"]
-
-    st.markdown(
-        f"""
-        <style>
-        .stApp {{
-            background-color: {brand_colors['midnight']};
-            background-attachment: fixed;
-        }}
-        .right-bg {{
-            position: fixed;
-            top: 0;
-            right: 0;
-            height: 100vh;
-            width: 50vw;
-            display: flex;
-            justify-content: flex-end;
-            align-items: center;
-            pointer-events: none;
-            z-index: -1;
-            opacity: 0.25;
-        }}
-        .right-bg svg {{
-            height: 80vh;
-            width: auto;
-        }}
-        .main {{
-            background-color: transparent;
-        }}
-        div[data-testid="stFileUploader"] label {{
-            color: black !important;
-        }}
-        div[data-testid="stFileUploader"] span {{
-            color: black !important;
-        }}
-        div[data-testid="stFileUploader"] button {{
-            color: black !important;
-        }}
-        div[data-testid="stHeader"] {{
-            background-color: {brand_colors['midnight']};
-        }}
-        h1, h2, h3, h4, h5, h6 {{
-            color: {brand_colors['white']} !important;
-        }}
-        h1 {{
-            background-color: {brand_colors['midnight']};
-            padding: 1rem;
-            margin: -1rem -1rem 1rem -1rem;
-        }}
-        p, div, span, label {{
-            color: {brand_colors['white']} !important;
-        }}
-        /* Sidebar navigation background */
-        section[data-testid="stSidebar"],
-        section[data-testid="stSidebar"] > div {{
-            background-color: #3C405B !important;
-        }}
-        /* Dropdowns and selects - force black text on white backgrounds */
-        div[data-baseweb="select"] *,
-        div[data-baseweb="select"] span,
-        div[data-baseweb="select"] div,
-        div[data-baseweb="select"] input {{
-            color: #000000 !important;
-        }}
-        div[data-baseweb="select"] > div {{
-            background-color: #ffffff !important;
-        }}
-        /* Multiselect tags */
-        span[data-baseweb="tag"],
-        span[data-baseweb="tag"] *,
-        span[data-baseweb="tag"] span {{
-            color: #000000 !important;
-        }}
-        /* Dropdown option list */
-        div[role="listbox"] *,
-        div[role="listbox"] div,
-        div[role="option"] div,
-        div[role="option"] span {{
-            color: #000000 !important;
-        }}
-        input {{
-            color: #000000 !important;
-            background-color: {brand_colors['white']};
-        }}
-        .uploadedFile {{
-            background-color: {brand_colors['white']};
-            color: #000000 !important;
-        }}
-        /* Results text should be white on midnight background */
-        .stMarkdown {{
-            color: {brand_colors['white']} !important;
-        }}
-        pre {{
-            color: {brand_colors['white']} !important;
-            background-color: rgba(255, 255, 255, 0.1) !important;
-        }}
-        /* Help (?) icon - white so it's visible on dark background */
-        [data-testid="stWidgetLabel"] button svg path {{
-            fill: {brand_colors['white']} !important;
-        }}
-        button[data-testid="stBaseButton-minimal"] svg path {{
-            fill: {brand_colors['white']} !important;
-        }}
-        /* Tooltip popup - black text on white background */
-        [data-testid="stTooltipContent"],
-        [data-testid="stTooltipContent"] p,
-        [data-testid="stTooltipContent"] div,
-        [data-testid="stTooltipContent"] span {{
-            color: #000000 !important;
-            background-color: {brand_colors['white']} !important;
-        }}
-        .stButton>button {{
-            background-color: {brand_colors['primary_blue']};
-            color: {brand_colors['white']};
-            border: none;
-            border-radius: 4px;
-            padding: 0.5rem 1rem;
-            font-weight: bold;
-        }}
-        .stButton>button:hover {{
-            background-color: {brand_colors['primary_green']};
-        }}
-        .stDownloadButton>button {{
-            background-color: {brand_colors['primary_blue']};
-            color: {brand_colors['white']};
-            border: none;
-            border-radius: 4px;
-            padding: 0.5rem 1rem;
-            font-weight: bold;
-        }}
-        .stDownloadButton>button:hover {{
-            background-color: {brand_colors['primary_green']};
-        }}
-        .stSelectbox label, .stMultiSelect label, .stNumberInput label, .stCheckbox label {{
-            color: {brand_colors['white']} !important;
-        }}
-        div[data-testid="stDataFrame"] {{
-            height: 600px !important;
-        }}
-        .stSuccess, .stInfo {{
-            color: {brand_colors['white']} !important;
-        }}
-        </style>
-        """,
-        unsafe_allow_html=True,
-    )
-
-    with open("assets/Trapz.svg", "r") as f:
-        background_svg = f.read()
-
-    st.markdown(
-        f"""
-        <div style="background-color: {brand_colors['midnight']}; padding: 1.5rem; margin: -1rem -1rem 2rem -1rem; display: flex; align-items: center; gap: 2rem;">
-            <div style="text-align: center; width: 75px;">
-                {logo_svg}
-            </div>
-            <div class="right-bg">
-                {background_svg}
-            </div>
-            <h1 style="margin: 0; color: {brand_colors['white']}; flex-grow: 1;">Reconciliation</h1>
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
+    apply_global_styles()
+    render_header("Reconciliation")
 
     if "first_df" not in st.session_state:
         st.session_state.first_df = None
@@ -467,8 +257,6 @@ def main():
         st.session_state.second_df = None
     if "result" not in st.session_state:
         st.session_state.result = None
-    if "nlq_result" not in st.session_state:
-        st.session_state.nlq_result = None
     if "pending_profile" not in st.session_state:
         st.session_state.pending_profile = None
 
@@ -484,7 +272,7 @@ def main():
         )
         if first_file:
             try:
-                st.session_state.first_df = pd.read_excel(first_file)
+                st.session_state.first_df = pd.read_excel(first_file, dtype=str)
                 st.success(f"✓ Loaded: {first_file.name}")
             except Exception as e:
                 st.error(f"Error reading first file: {e}")
@@ -498,7 +286,7 @@ def main():
         )
         if second_file:
             try:
-                st.session_state.second_df = pd.read_excel(second_file)
+                st.session_state.second_df = pd.read_excel(second_file, dtype=str)
                 st.success(f"✓ Loaded: {second_file.name}")
             except Exception as e:
                 st.error(f"Error reading second file: {e}")
@@ -545,6 +333,8 @@ def main():
                 saved_tol = cfg.get("tolerance_type", "None")
                 if saved_tol in tolerance_options:
                     st.session_state["tolerance_type_select"] = saved_tol
+                if cfg.get("tolerance_value") is not None:
+                    st.session_state["tolerance_value_input"] = float(cfg["tolerance_value"])
                 st.session_state.pending_profile = None
 
             st.markdown("**Match keys (first file)**")
@@ -588,12 +378,16 @@ def main():
 
             tolerance_value = None
             if tolerance_type != "None":
+                is_pct = tolerance_type == "Percentage (%)"
                 tolerance_value = st.number_input(
-                    "Tolerance value",
+                    "Tolerance value (%)" if is_pct else "Tolerance value ($)",
                     min_value=0.0,
+                    max_value=100.0 if is_pct else None,
                     value=0.0,
-                    step=0.01,
-                    format="%.2f",
+                    step=0.1 if is_pct else 0.01,
+                    format="%.1f" if is_pct else "%.2f",
+                    help="Enter a percentage, e.g. 10 means 10%" if is_pct else None,
+                    key="tolerance_value_input",
                 )
 
             if st.button("Run Comparison", use_container_width=False):
@@ -617,7 +411,6 @@ def main():
                                 distinct_list=True,
                             )
                             st.session_state.result = result
-                            st.session_state.nlq_result = None
                             st.success("Comparison complete!")
                     except Exception as e:
                         st.error(f"Error during comparison: {e}")
@@ -655,67 +448,57 @@ def main():
             st.info("Upload both files to configure the comparison")
 
     if st.session_state.result:
+        result = st.session_state.result
         st.markdown("### Results")
 
+        # ------------------------------------------------------------------ #
+        # Prominent metric cards
+        # ------------------------------------------------------------------ #
+        unmatched = result.total_records - result.matched_records
+        pct = result.match_percentage
+        pct_color = (
+            brand_colors["primary_green"] if pct >= 95
+            else ("#FFA500" if pct >= 75 else "#FF4444")
+        )
         st.markdown(
             f"""
-            <div style="background-color: {brand_colors['midnight']}; padding: 1rem; border-radius: 4px; margin-bottom: 1rem;">
-                <pre style="color: {brand_colors['white']}; margin: 0; font-family: monospace;">{st.session_state.result.summary_text}</pre>
+            <div style="display: flex; gap: 1rem; margin-bottom: 1.5rem;">
+                <div style="flex: 1; background: linear-gradient(135deg, #112563, {brand_colors['primary_blue']}); \
+border-radius: 10px; padding: 1.5rem 1rem; text-align: center; \
+border-top: 4px solid {brand_colors['cool_gray']};">
+                    <div style="font-size: 0.75rem; color: {brand_colors['cool_gray']}; \
+text-transform: uppercase; letter-spacing: 1.5px; margin-bottom: 0.6rem;">Total Records</div>
+                    <div style="font-size: 2.8rem; font-weight: 800; \
+color: {brand_colors['white']}; line-height: 1;">{result.total_records:,}</div>
+                </div>
+                <div style="flex: 1; background: linear-gradient(135deg, #112563, {brand_colors['primary_blue']}); \
+border-radius: 10px; padding: 1.5rem 1rem; text-align: center; \
+border-top: 4px solid {brand_colors['primary_green']};">
+                    <div style="font-size: 0.75rem; color: {brand_colors['cool_gray']}; \
+text-transform: uppercase; letter-spacing: 1.5px; margin-bottom: 0.6rem;">Matched</div>
+                    <div style="font-size: 2.8rem; font-weight: 800; \
+color: {brand_colors['primary_green']}; line-height: 1;">{result.matched_records:,}</div>
+                </div>
+                <div style="flex: 1; background: linear-gradient(135deg, #112563, {brand_colors['primary_blue']}); \
+border-radius: 10px; padding: 1.5rem 1rem; text-align: center; \
+border-top: 4px solid #FF4444;">
+                    <div style="font-size: 0.75rem; color: {brand_colors['cool_gray']}; \
+text-transform: uppercase; letter-spacing: 1.5px; margin-bottom: 0.6rem;">Unmatched</div>
+                    <div style="font-size: 2.8rem; font-weight: 800; \
+color: #FF4444; line-height: 1;">{unmatched:,}</div>
+                </div>
+                <div style="flex: 1; background: linear-gradient(135deg, #112563, {brand_colors['primary_blue']}); \
+border-radius: 10px; padding: 1.5rem 1rem; text-align: center; \
+border-top: 4px solid {pct_color};">
+                    <div style="font-size: 0.75rem; color: {brand_colors['cool_gray']}; \
+text-transform: uppercase; letter-spacing: 1.5px; margin-bottom: 0.6rem;">Match Rate</div>
+                    <div style="font-size: 2.8rem; font-weight: 800; \
+color: {pct_color}; line-height: 1;">{pct:.1f}%</div>
+                </div>
             </div>
             """,
             unsafe_allow_html=True,
         )
-
-        # ------------------------------------------------------------------ #
-        # Natural Language Query section (above Preview Results)
-        # ------------------------------------------------------------------ #
-        st.markdown("---")
-        st.markdown("### Ask a Question About the Results")
-        st.markdown(
-            "Query the reconciliation data in plain English. "
-            "*Examples: \"Show me any differences over 5%\" &nbsp;\u00b7&nbsp; "
-            "\"Can you show me any records for Supplier ACME Widgets\"*"
-        )
-
-        nlq_col1, nlq_col2 = st.columns([5, 1])
-        with nlq_col1:
-            nlq_question = st.text_input(
-                "Your question",
-                placeholder="e.g. Show me any differences over 5%",
-                key="nlq_question",
-                label_visibility="collapsed",
-            )
-        with nlq_col2:
-            nlq_submit = st.button("Ask", use_container_width=True, key="nlq_submit")
-
-        if nlq_submit and nlq_question:
-            api_key = os.environ.get("ANTHROPIC_API_KEY", "")
-            if not api_key:
-                st.error(
-                    "ANTHROPIC_API_KEY is not configured. "
-                    "Add it to .streamlit/secrets.toml or set it as an environment variable."
-                )
-            else:
-                with st.spinner("Analysing your question..."):
-                    nlq_df, nlq_answer = query_results_with_nlq(
-                        st.session_state.result.merged, nlq_question
-                    )
-                st.session_state.nlq_result = (nlq_df, nlq_answer)
-
-        if st.session_state.nlq_result is not None:
-            nlq_df, nlq_answer = st.session_state.nlq_result
-            st.markdown(
-                f"""
-                <div style="background-color: {brand_colors['midnight']}; padding: 1rem;
-                            border-radius: 4px; margin-bottom: 1rem;
-                            border-left: 4px solid {brand_colors['primary_green']};">
-                    <p style="color: {brand_colors['white']}; margin: 0;">{nlq_answer}</p>
-                </div>
-                """,
-                unsafe_allow_html=True,
-            )
-            if nlq_df is not None:
-                st.dataframe(nlq_df, use_container_width=True, height=400)
 
         # ------------------------------------------------------------------ #
         # Filter + Preview Results
@@ -730,7 +513,7 @@ def main():
         with filter_col2:
             show_matches_only = st.checkbox("Show matches only", value=False)
 
-        filtered_df = st.session_state.result.merged.copy()
+        filtered_df = result.merged.copy()
         if show_differences_only and not show_matches_only:
             filtered_df = filtered_df[filtered_df["Difference"]]
         elif show_matches_only and not show_differences_only:
@@ -738,16 +521,6 @@ def main():
 
         st.markdown(f"**Preview Results ({len(filtered_df)} rows)**")
         st.dataframe(filtered_df, use_container_width=True, height=600)
-
-        st.markdown("**Download Options**")
-        download_filename = st.text_input(
-            "File name for download",
-            value="reconciliation_results.xlsx",
-            help="Enter the desired filename (must end with .xlsx)",
-        )
-
-        if not download_filename.endswith(".xlsx"):
-            download_filename += ".xlsx"
 
         output_buffer = BytesIO()
         filtered_df.to_excel(output_buffer, index=False)
@@ -761,13 +534,24 @@ def main():
         with open(temp_filename, "rb") as f:
             excel_data = f.read()
 
-        st.download_button(
-            label="Download Results",
-            data=excel_data,
-            file_name=download_filename,
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            use_container_width=False,
-        )
+        if st.button("Download Results", key="download_results_btn"):
+            root = tk.Tk()
+            root.withdraw()
+            root.wm_attributes("-topmost", True)
+            save_path = filedialog.asksaveasfilename(
+                defaultextension=".xlsx",
+                filetypes=[("Excel files", "*.xlsx")],
+                initialfile="reconciliation_results.xlsx",
+                title="Save reconciliation results",
+            )
+            root.destroy()
+            if save_path:
+                try:
+                    with open(save_path, "wb") as f:
+                        f.write(excel_data)
+                    st.success(f"Saved to {save_path}")
+                except Exception as exc:
+                    st.error(f"Could not save file: {exc}")
 
 
 if __name__ == "__main__":

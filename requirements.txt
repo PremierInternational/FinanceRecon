@@ -1,4 +1,3 @@
-anthropic
 et_xmlfile
 numpy
 openpyxl
