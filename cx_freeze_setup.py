@@ -84,7 +84,6 @@ build_exe_options = {
         "google.protobuf",
         "importlib.metadata",
         "importlib.resources",
-        "pkg_resources",
         "dateutil",
         "pytz",
         "tzdata",

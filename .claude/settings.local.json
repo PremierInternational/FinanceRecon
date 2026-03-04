@@ -1,0 +1,10 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python -c \":*)",
+      "Bash(python -c \"import PyPDF2; print\\(''ok''\\)\")",
+      "Bash(python -c \"import fitz; print\\(''ok''\\)\")",
+      "Bash(pip install pypdf --quiet)"
+    ]
+  }
+}

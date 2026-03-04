@@ -10,5 +10,19 @@
     "compare_col_second": "CREDIT",
     "tolerance_type": "Dollar ($)",
     "tolerance_value": 100.0
+  },
+  "Test2": {
+    "match_keys_first": [
+      "BUSINESS_UNIT",
+      "LOCATION"
+    ],
+    "match_keys_second": [
+      "BUSINESS_UNIT",
+      "LOCATION"
+    ],
+    "compare_col_first": "CREDIT",
+    "compare_col_second": "CREDIT",
+    "tolerance_type": "Percentage (%)",
+    "tolerance_value": 5.0
   }
 }

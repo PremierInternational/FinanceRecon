@@ -17,9 +17,23 @@ import pandas as pd
 import streamlit as st
 from openpyxl import load_workbook
 
-from utils import BRAND_COLORS, apply_global_styles, render_header
+from utils import apply_global_styles, render_header
 
 PROFILES_FILE = "config_profiles.json"
+
+# ── Official Definian brand colors ──────────────────────────────────────── #
+_C = {
+    "midnight":  "#02072D",
+    "blue":      "#0D2C71",
+    "green":     "#00AB63",
+    "cool_gray": "#D8D7EE",
+    "dark_gray": "#3C405B",
+    "panel":     "#06103d",
+    "text_sec":  "#8a8eb8",
+    "border":    "#3C405B",
+    "red":       "#e05252",
+    "amber":     "#f59e0b",
+}
 
 
 @dataclass
@@ -235,323 +249,472 @@ def _format_output(output_file: str, merged_df: pd.DataFrame) -> None:
     workbook.save(output_file)
 
 
+def _section_header(text: str) -> None:
+    """Render a branded section label."""
+    st.markdown(
+        f"""<div style="font-family:'Titillium Web',sans-serif; font-size:10px;
+                        font-weight:700; letter-spacing:1.5px; text-transform:uppercase;
+                        color:{_C['text_sec']}; border-bottom:1px solid {_C['border']};
+                        padding-bottom:6px; margin-bottom:12px; margin-top:4px;">
+                {text}
+            </div>""",
+        unsafe_allow_html=True,
+    )
 
 
-#def get_base64_svg(path):
-#    with open(path, "rb") as f:
-#        return base64.b64encode(f.read()).decode()
-# ----------------------------- Streamlit UI ----------------------------- #
+# ─────────────────────────── Streamlit UI ─────────────────────────────── #
 def main():
     """Main Streamlit application."""
 
-    st.set_page_config(page_title="Reconciliation", layout="wide")
-
-    brand_colors = BRAND_COLORS
-
+    st.set_page_config(page_title="GL Reconciliation", layout="wide")
     apply_global_styles()
-    render_header("Reconciliation")
+    render_header("GL Reconciliation")
 
-    if "first_df" not in st.session_state:
-        st.session_state.first_df = None
-    if "second_df" not in st.session_state:
-        st.session_state.second_df = None
-    if "result" not in st.session_state:
-        st.session_state.result = None
-    if "pending_profile" not in st.session_state:
-        st.session_state.pending_profile = None
+    # ── Session state ── #
+    for key, default in [
+        ("first_df", None),
+        ("second_df", None),
+        ("result", None),
+        ("pending_profile", None),
+        ("show_save_form", False),
+    ]:
+        if key not in st.session_state:
+            st.session_state[key] = default
 
-    col1, col2 = st.columns(2)
+    # ── Feedback button — right-aligned, sits at the tab row level ── #
+    st.markdown(
+        """
+        <style>
+        .definian-tab-row {
+            display: flex;
+            align-items: center;
+            justify-content: flex-end;
+            margin-bottom: -44px;   /* overlap with the tab bar below */
+            position: relative;
+            z-index: 10;
+            pointer-events: none;   /* let clicks fall through to tabs */
+        }
+        .definian-feedback-btn {
+            pointer-events: all;
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            padding: 6px 16px;
+            background-color: #00AB63;
+            border-radius: 5px;
+            text-decoration: none !important;
+            cursor: pointer;
+            transition: background-color 0.15s ease;
+            white-space: nowrap;
+        }
+        .definian-feedback-btn:hover {
+            background-color: #00c870;
+        }
+        .definian-feedback-btn span {
+            color: #ffffff !important;
+            font-family: 'Titillium Web', sans-serif !important;
+            font-size: 11px !important;
+            font-weight: 700 !important;
+            letter-spacing: 0.8px !important;
+            text-transform: uppercase !important;
+            line-height: 1.2;
+        }
+        </style>
+        <div class="definian-tab-row">
+            <a class="definian-feedback-btn"
+               href="https://app.smartsheet.com/b/form/019c9b6cf0b47518a512747269be8f97"
+               target="_blank" rel="noopener noreferrer">
+                <span>&#8599; Submit Feedback</span>
+            </a>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
 
-    with col1:
-        st.markdown("### Upload Files")
-        first_file = st.file_uploader(
-            "Select first file",
-            type=["xlsx", "xls"],
-            key="first_file",
-            help="Upload the first Excel file to compare",
-        )
-        if first_file:
-            try:
-                st.session_state.first_df = pd.read_excel(first_file, dtype=str)
-                st.success(f"✓ Loaded: {first_file.name}")
-            except Exception as e:
-                st.error(f"Error reading first file: {e}")
-                st.session_state.first_df = None
+    recon_tab, config_tab = st.tabs(["Run Recon", "Manage Configuration"])
 
-        second_file = st.file_uploader(
-            "Select second file",
-            type=["xlsx", "xls"],
-            key="second_file",
-            help="Upload the second Excel file to compare",
-        )
-        if second_file:
-            try:
-                st.session_state.second_df = pd.read_excel(second_file, dtype=str)
-                st.success(f"✓ Loaded: {second_file.name}")
-            except Exception as e:
-                st.error(f"Error reading second file: {e}")
-                st.session_state.second_df = None
+    # ══════════════════════════════════════════════════════════════════════ #
+    #  TAB 1 — Run Recon
+    # ══════════════════════════════════════════════════════════════════════ #
+    with recon_tab:
+        col1, col2 = st.columns(2, gap="large")
 
-    with col2:
-        st.markdown("### Configure")
+        # ── Upload Files ── #
+        with col1:
+            _section_header("Upload Files")
 
-        if st.session_state.first_df is not None and st.session_state.second_df is not None:
-            first_cols = list(st.session_state.first_df.columns)
-            second_cols = list(st.session_state.second_df.columns)
-
-            # ---- Load Profile ---- #
-            profiles = load_profiles()
-            if profiles:
-                st.markdown("**Load Profile**")
-                lp_col1, lp_col2 = st.columns([4, 1])
-                with lp_col1:
-                    profile_to_load = st.selectbox(
-                        "Select a saved profile",
-                        [""] + list(profiles.keys()),
-                        key="profile_selector",
-                        label_visibility="collapsed",
-                    )
-                with lp_col2:
-                    if st.button("Load", key="load_profile_btn") and profile_to_load:
-                        st.session_state.pending_profile = profiles[profile_to_load]
-                        st.rerun()
-
-            # Apply a pending profile now that columns are known
-            if st.session_state.pending_profile:
-                cfg = st.session_state.pending_profile
-                st.session_state["match_keys_first"] = [
-                    k for k in cfg.get("match_keys_first", []) if k in first_cols
-                ]
-                st.session_state["match_keys_second"] = [
-                    k for k in cfg.get("match_keys_second", []) if k in second_cols
-                ]
-                if cfg.get("compare_col_first") in first_cols:
-                    st.session_state["compare_col_first"] = cfg["compare_col_first"]
-                if cfg.get("compare_col_second") in second_cols:
-                    st.session_state["compare_col_second"] = cfg["compare_col_second"]
-                tolerance_options = ["None", "Dollar ($)", "Percentage (%)"]
-                saved_tol = cfg.get("tolerance_type", "None")
-                if saved_tol in tolerance_options:
-                    st.session_state["tolerance_type_select"] = saved_tol
-                if cfg.get("tolerance_value") is not None:
-                    st.session_state["tolerance_value_input"] = float(cfg["tolerance_value"])
-                st.session_state.pending_profile = None
-
-            st.markdown("**Match keys (first file)**")
-            match_keys_first = st.multiselect(
-                "Select one or more columns",
-                first_cols,
-                key="match_keys_first",
-                label_visibility="collapsed",
+            first_file = st.file_uploader(
+                "First file",
+                type=["xlsx", "xls"],
+                key="first_file",
+                help="Upload the first Excel file to compare",
             )
+            if first_file:
+                try:
+                    st.session_state.first_df = pd.read_excel(first_file, dtype=str)
+                    st.success(f"Loaded: {first_file.name}")
+                except Exception as e:
+                    st.error(f"Error reading first file: {e}")
+                    st.session_state.first_df = None
 
-            st.markdown("**Match keys (second file)**")
-            match_keys_second = st.multiselect(
-                "Select one or more columns",
-                second_cols,
-                key="match_keys_second",
-                label_visibility="collapsed",
+            second_file = st.file_uploader(
+                "Second file",
+                type=["xlsx", "xls"],
+                key="second_file",
+                help="Upload the second Excel file to compare",
             )
+            if second_file:
+                try:
+                    st.session_state.second_df = pd.read_excel(second_file, dtype=str)
+                    st.success(f"Loaded: {second_file.name}")
+                except Exception as e:
+                    st.error(f"Error reading second file: {e}")
+                    st.session_state.second_df = None
 
-            st.markdown("**Compare column (first file)**")
-            compare_col_first = st.selectbox(
-                "Select compare column",
-                first_cols,
-                key="compare_col_first",
-                label_visibility="collapsed",
-            )
+        # ── Configure ── #
+        with col2:
+            _section_header("Configure")
 
-            st.markdown("**Compare column (second file)**")
-            compare_col_second = st.selectbox(
-                "Select compare column",
-                second_cols,
-                key="compare_col_second",
-                label_visibility="collapsed",
-            )
+            if st.session_state.first_df is not None and st.session_state.second_df is not None:
+                first_cols = list(st.session_state.first_df.columns)
+                second_cols = list(st.session_state.second_df.columns)
 
-            tolerance_type = st.selectbox(
-                "Tolerance type",
-                ["None", "Dollar ($)", "Percentage (%)"],
-                index=0,
-                key="tolerance_type_select",
-            )
+                # Load profile shortcut
+                profiles = load_profiles()
+                if profiles:
+                    lp_col1, lp_col2 = st.columns([4, 1])
+                    with lp_col1:
+                        profile_to_load = st.selectbox(
+                            "Load profile",
+                            [""] + list(profiles.keys()),
+                            key="profile_selector",
+                        )
+                    with lp_col2:
+                        st.markdown("<div style='margin-top:24px'></div>", unsafe_allow_html=True)
+                        if st.button("Apply", key="load_profile_btn") and profile_to_load:
+                            st.session_state.pending_profile = profiles[profile_to_load]
+                            st.rerun()
 
-            tolerance_value = None
-            if tolerance_type != "None":
-                is_pct = tolerance_type == "Percentage (%)"
-                tolerance_value = st.number_input(
-                    "Tolerance value (%)" if is_pct else "Tolerance value ($)",
-                    min_value=0.0,
-                    max_value=100.0 if is_pct else None,
-                    value=0.0,
-                    step=0.1 if is_pct else 0.01,
-                    format="%.1f" if is_pct else "%.2f",
-                    help="Enter a percentage, e.g. 10 means 10%" if is_pct else None,
-                    key="tolerance_value_input",
+                # Apply a pending profile now that columns are known
+                if st.session_state.pending_profile:
+                    cfg = st.session_state.pending_profile
+                    st.session_state["match_keys_first"] = [
+                        k for k in cfg.get("match_keys_first", []) if k in first_cols
+                    ]
+                    st.session_state["match_keys_second"] = [
+                        k for k in cfg.get("match_keys_second", []) if k in second_cols
+                    ]
+                    if cfg.get("compare_col_first") in first_cols:
+                        st.session_state["compare_col_first"] = cfg["compare_col_first"]
+                    if cfg.get("compare_col_second") in second_cols:
+                        st.session_state["compare_col_second"] = cfg["compare_col_second"]
+                    tolerance_options = ["None", "Dollar ($)", "Percentage (%)"]
+                    saved_tol = cfg.get("tolerance_type", "None")
+                    if saved_tol in tolerance_options:
+                        st.session_state["tolerance_type_select"] = saved_tol
+                    if cfg.get("tolerance_value") is not None:
+                        st.session_state["tolerance_value_input"] = float(cfg["tolerance_value"])
+                    st.session_state.pending_profile = None
+
+                match_keys_first = st.multiselect(
+                    "Match keys — first file",
+                    first_cols,
+                    key="match_keys_first",
+                )
+                match_keys_second = st.multiselect(
+                    "Match keys — second file",
+                    second_cols,
+                    key="match_keys_second",
                 )
 
-            if st.button("Run Comparison", use_container_width=False):
-                if not match_keys_first or not match_keys_second:
-                    st.error("Please select match key columns for both files.")
-                elif not compare_col_first or not compare_col_second:
-                    st.error("Please select compare columns for both files.")
-                else:
-                    try:
-                        with st.spinner("Running comparison..."):
-                            result = compare_data(
-                                st.session_state.first_df,
-                                st.session_state.second_df,
-                                match_keys_first,
-                                match_keys_second,
-                                compare_col_first,
-                                compare_col_second,
-                                output_file=None,
-                                tolerance_type=None if tolerance_type == "None" else tolerance_type,
-                                tolerance_value=tolerance_value if tolerance_type != "None" else None,
-                                distinct_list=True,
-                            )
-                            st.session_state.result = result
-                            st.success("Comparison complete!")
-                    except Exception as e:
-                        st.error(f"Error during comparison: {e}")
-                        st.session_state.result = None
+                cmp_col1, cmp_col2 = st.columns(2)
+                with cmp_col1:
+                    compare_col_first = st.selectbox(
+                        "Compare column — first file",
+                        first_cols,
+                        key="compare_col_first",
+                    )
+                with cmp_col2:
+                    compare_col_second = st.selectbox(
+                        "Compare column — second file",
+                        second_cols,
+                        key="compare_col_second",
+                    )
 
-            # ---- Save Profile ---- #
-            st.markdown("---")
-            st.markdown("**Save Configuration Profile**")
-            sp_col1, sp_col2 = st.columns([4, 1])
-            with sp_col1:
+                tol_col1, tol_col2 = st.columns(2)
+                with tol_col1:
+                    tolerance_type = st.selectbox(
+                        "Tolerance type",
+                        ["None", "Dollar ($)", "Percentage (%)"],
+                        key="tolerance_type_select",
+                    )
+                with tol_col2:
+                    tolerance_value = None
+                    if tolerance_type != "None":
+                        is_pct = tolerance_type == "Percentage (%)"
+                        tolerance_value = st.number_input(
+                            "Tolerance value (%)" if is_pct else "Tolerance value ($)",
+                            min_value=0.0,
+                            max_value=100.0 if is_pct else None,
+                            value=0.0,
+                            step=0.1 if is_pct else 0.01,
+                            format="%.1f" if is_pct else "%.2f",
+                            help="Enter a percentage, e.g. 10 means 10%" if is_pct else None,
+                            key="tolerance_value_input",
+                        )
+
+                st.markdown("<div style='margin-top:8px'></div>", unsafe_allow_html=True)
+                run_col, save_col = st.columns(2)
+                with run_col:
+                    if st.button("Run Comparison", use_container_width=True, key="run_btn"):
+                        if not match_keys_first or not match_keys_second:
+                            st.error("Please select match key columns for both files.")
+                        elif not compare_col_first or not compare_col_second:
+                            st.error("Please select compare columns for both files.")
+                        else:
+                            try:
+                                with st.spinner("Running comparison..."):
+                                    result = compare_data(
+                                        st.session_state.first_df,
+                                        st.session_state.second_df,
+                                        match_keys_first,
+                                        match_keys_second,
+                                        compare_col_first,
+                                        compare_col_second,
+                                        output_file=None,
+                                        tolerance_type=None if tolerance_type == "None" else tolerance_type,
+                                        tolerance_value=tolerance_value if tolerance_type != "None" else None,
+                                        distinct_list=True,
+                                    )
+                                    st.session_state.result = result
+                                    st.success("Comparison complete!")
+                            except Exception as e:
+                                st.error(f"Error during comparison: {e}")
+                                st.session_state.result = None
+                with save_col:
+                    if st.button("Save Configuration", use_container_width=True, key="open_save_btn"):
+                        st.session_state.show_save_form = not st.session_state.show_save_form
+
+                # Inline save form
+                if st.session_state.show_save_form:
+                    st.markdown(
+                        f"""<div style="background:{_C['panel']}; border:1px solid {_C['border']};
+                                        border-left:3px solid {_C['green']}; border-radius:5px;
+                                        padding:0.75rem 1rem; margin-top:0.5rem;">
+                                <span style="font-family:'Titillium Web',sans-serif; font-size:10px;
+                                             font-weight:700; letter-spacing:1px; text-transform:uppercase;
+                                             color:{_C['text_sec']};">Save Current Configuration</span>
+                            </div>""",
+                        unsafe_allow_html=True,
+                    )
+                    sf_col1, sf_col2, sf_col3 = st.columns([5, 1, 1])
+                    with sf_col1:
+                        save_name = st.text_input(
+                            "Profile name",
+                            key="inline_save_name",
+                            placeholder="e.g. Monthly Vendor Reconciliation",
+                            label_visibility="collapsed",
+                        )
+                    with sf_col2:
+                        if st.button("Save", key="inline_save_btn"):
+                            if not save_name:
+                                st.error("Enter a name.")
+                            else:
+                                save_profile(
+                                    save_name,
+                                    {
+                                        "match_keys_first": match_keys_first,
+                                        "match_keys_second": match_keys_second,
+                                        "compare_col_first": compare_col_first,
+                                        "compare_col_second": compare_col_second,
+                                        "tolerance_type": tolerance_type,
+                                        "tolerance_value": tolerance_value,
+                                    },
+                                )
+                                st.success(f"\u2018{save_name}\u2019 saved.")
+                                st.session_state.show_save_form = False
+                                st.rerun()
+                    with sf_col3:
+                        if st.button("Cancel", key="inline_save_cancel"):
+                            st.session_state.show_save_form = False
+                            st.rerun()
+
+            else:
+                st.info("Upload both files to configure the comparison.")
+
+        # ── Results ── #
+        if st.session_state.result:
+            result = st.session_state.result
+
+            st.markdown("<div style='margin-top:1.5rem'></div>", unsafe_allow_html=True)
+            _section_header("Results")
+
+            # Metric cards
+            unmatched = result.total_records - result.matched_records
+            pct = result.match_percentage
+            pct_color = _C["green"] if pct >= 95 else (_C["amber"] if pct >= 75 else _C["red"])
+
+            card = (
+                f"flex:1; background:{_C['panel']}; border-radius:6px;"
+                f" padding:1.25rem 1rem; text-align:center;"
+                f" border:1px solid {_C['border']};"
+            )
+            lbl = (
+                f"font-family:'Titillium Web',sans-serif; font-size:9px; font-weight:700;"
+                f" letter-spacing:1.5px; text-transform:uppercase;"
+                f" color:{_C['text_sec']}; margin-bottom:0.5rem;"
+            )
+            val = (
+                "font-family:'Roboto',sans-serif; font-size:2.4rem;"
+                " font-weight:700; line-height:1;"
+            )
+
+            st.markdown(
+                f"""
+                <div style="display:flex; gap:0.75rem; margin-bottom:1.5rem;">
+                    <div style="{card} border-top:3px solid {_C['blue']};">
+                        <div style="{lbl}">Total Records</div>
+                        <div style="{val} color:{_C['cool_gray']};">{result.total_records:,}</div>
+                    </div>
+                    <div style="{card} border-top:3px solid {_C['green']};">
+                        <div style="{lbl}">Matched</div>
+                        <div style="{val} color:{_C['green']};">{result.matched_records:,}</div>
+                    </div>
+                    <div style="{card} border-top:3px solid {_C['red']};">
+                        <div style="{lbl}">Unmatched</div>
+                        <div style="{val} color:{_C['red']};">{unmatched:,}</div>
+                    </div>
+                    <div style="{card} border-top:3px solid {pct_color};">
+                        <div style="{lbl}">Match Rate</div>
+                        <div style="{val} color:{pct_color};">{pct:.1f}%</div>
+                    </div>
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
+
+            # Filter
+            _section_header("Filter")
+            filter_col1, filter_col2 = st.columns(2)
+            with filter_col1:
+                show_differences_only = st.checkbox("Show differences only", value=False)
+            with filter_col2:
+                show_matches_only = st.checkbox("Show matches only", value=False)
+
+            filtered_df = result.merged.copy()
+            if show_differences_only and not show_matches_only:
+                filtered_df = filtered_df[filtered_df["Difference"]]
+            elif show_matches_only and not show_differences_only:
+                filtered_df = filtered_df[~filtered_df["Difference"]]
+
+            _section_header(f"Preview — {len(filtered_df):,} rows")
+            st.dataframe(filtered_df, use_container_width=True, height=550)
+
+            # Download
+            output_buffer = BytesIO()
+            filtered_df.to_excel(output_buffer, index=False)
+            output_buffer.seek(0)
+
+            temp_filename = "temp_reconciliation_results.xlsx"
+            with open(temp_filename, "wb") as f:
+                f.write(output_buffer.getvalue())
+            _format_output(temp_filename, filtered_df)
+
+            with open(temp_filename, "rb") as f:
+                excel_data = f.read()
+
+            if st.button("Download Results", key="download_results_btn"):
+                root = tk.Tk()
+                root.withdraw()
+                root.wm_attributes("-topmost", True)
+                save_path = filedialog.asksaveasfilename(
+                    defaultextension=".xlsx",
+                    filetypes=[("Excel files", "*.xlsx")],
+                    initialfile="reconciliation_results.xlsx",
+                    title="Save reconciliation results",
+                )
+                root.destroy()
+                if save_path:
+                    try:
+                        with open(save_path, "wb") as f:
+                            f.write(excel_data)
+                        st.success(f"Saved to {save_path}")
+                    except Exception as exc:
+                        st.error(f"Could not save file: {exc}")
+
+    # ══════════════════════════════════════════════════════════════════════ #
+    #  TAB 2 — Manage Configuration
+    # ══════════════════════════════════════════════════════════════════════ #
+    with config_tab:
+        cfg_col1, cfg_col2 = st.columns(2, gap="large")
+
+        # ── Save Profile ── #
+        with cfg_col1:
+            _section_header("Save Current Configuration")
+
+            if (
+                st.session_state.first_df is not None
+                and st.session_state.second_df is not None
+                and "match_keys_first" in st.session_state
+            ):
                 profile_name = st.text_input(
                     "Profile name",
                     key="profile_name_input",
                     placeholder="e.g. Monthly Vendor Reconciliation",
-                    label_visibility="collapsed",
                 )
-            with sp_col2:
-                if st.button("Save", key="save_profile_btn"):
+                if st.button("Save Profile", key="save_profile_btn"):
                     if not profile_name:
                         st.error("Enter a profile name before saving.")
                     else:
                         save_profile(
                             profile_name,
                             {
-                                "match_keys_first": match_keys_first,
-                                "match_keys_second": match_keys_second,
-                                "compare_col_first": compare_col_first,
-                                "compare_col_second": compare_col_second,
-                                "tolerance_type": tolerance_type,
-                                "tolerance_value": tolerance_value,
+                                "match_keys_first": st.session_state.get("match_keys_first", []),
+                                "match_keys_second": st.session_state.get("match_keys_second", []),
+                                "compare_col_first": st.session_state.get("compare_col_first"),
+                                "compare_col_second": st.session_state.get("compare_col_second"),
+                                "tolerance_type": st.session_state.get("tolerance_type_select", "None"),
+                                "tolerance_value": st.session_state.get("tolerance_value_input"),
                             },
                         )
-                        st.success(f"Profile \u2018{profile_name}\u2019 saved!")
-        else:
-            st.info("Upload both files to configure the comparison")
+                        st.success(f"Profile \u2018{profile_name}\u2019 saved.")
+                        st.rerun()
+            else:
+                st.info("Upload files and configure a reconciliation in the Run Recon tab first.")
 
-    if st.session_state.result:
-        result = st.session_state.result
-        st.markdown("### Results")
+        # ── Saved Profiles ── #
+        with cfg_col2:
+            _section_header("Saved Profiles")
+            profiles = load_profiles()
 
-        # ------------------------------------------------------------------ #
-        # Prominent metric cards
-        # ------------------------------------------------------------------ #
-        unmatched = result.total_records - result.matched_records
-        pct = result.match_percentage
-        pct_color = (
-            brand_colors["primary_green"] if pct >= 95
-            else ("#FFA500" if pct >= 75 else "#FF4444")
-        )
-        st.markdown(
-            f"""
-            <div style="display: flex; gap: 1rem; margin-bottom: 1.5rem;">
-                <div style="flex: 1; background: linear-gradient(135deg, #112563, {brand_colors['primary_blue']}); \
-border-radius: 10px; padding: 1.5rem 1rem; text-align: center; \
-border-top: 4px solid {brand_colors['cool_gray']};">
-                    <div style="font-size: 0.75rem; color: {brand_colors['cool_gray']}; \
-text-transform: uppercase; letter-spacing: 1.5px; margin-bottom: 0.6rem;">Total Records</div>
-                    <div style="font-size: 2.8rem; font-weight: 800; \
-color: {brand_colors['white']}; line-height: 1;">{result.total_records:,}</div>
-                </div>
-                <div style="flex: 1; background: linear-gradient(135deg, #112563, {brand_colors['primary_blue']}); \
-border-radius: 10px; padding: 1.5rem 1rem; text-align: center; \
-border-top: 4px solid {brand_colors['primary_green']};">
-                    <div style="font-size: 0.75rem; color: {brand_colors['cool_gray']}; \
-text-transform: uppercase; letter-spacing: 1.5px; margin-bottom: 0.6rem;">Matched</div>
-                    <div style="font-size: 2.8rem; font-weight: 800; \
-color: {brand_colors['primary_green']}; line-height: 1;">{result.matched_records:,}</div>
-                </div>
-                <div style="flex: 1; background: linear-gradient(135deg, #112563, {brand_colors['primary_blue']}); \
-border-radius: 10px; padding: 1.5rem 1rem; text-align: center; \
-border-top: 4px solid #FF4444;">
-                    <div style="font-size: 0.75rem; color: {brand_colors['cool_gray']}; \
-text-transform: uppercase; letter-spacing: 1.5px; margin-bottom: 0.6rem;">Unmatched</div>
-                    <div style="font-size: 2.8rem; font-weight: 800; \
-color: #FF4444; line-height: 1;">{unmatched:,}</div>
-                </div>
-                <div style="flex: 1; background: linear-gradient(135deg, #112563, {brand_colors['primary_blue']}); \
-border-radius: 10px; padding: 1.5rem 1rem; text-align: center; \
-border-top: 4px solid {pct_color};">
-                    <div style="font-size: 0.75rem; color: {brand_colors['cool_gray']}; \
-text-transform: uppercase; letter-spacing: 1.5px; margin-bottom: 0.6rem;">Match Rate</div>
-                    <div style="font-size: 2.8rem; font-weight: 800; \
-color: {pct_color}; line-height: 1;">{pct:.1f}%</div>
-                </div>
-            </div>
-            """,
-            unsafe_allow_html=True,
-        )
-
-        # ------------------------------------------------------------------ #
-        # Filter + Preview Results
-        # ------------------------------------------------------------------ #
-        st.markdown("---")
-        st.markdown("**Filter Results**")
-        filter_col1, filter_col2 = st.columns(2)
-
-        with filter_col1:
-            show_differences_only = st.checkbox("Show differences only", value=False)
-
-        with filter_col2:
-            show_matches_only = st.checkbox("Show matches only", value=False)
-
-        filtered_df = result.merged.copy()
-        if show_differences_only and not show_matches_only:
-            filtered_df = filtered_df[filtered_df["Difference"]]
-        elif show_matches_only and not show_differences_only:
-            filtered_df = filtered_df[~filtered_df["Difference"]]
-
-        st.markdown(f"**Preview Results ({len(filtered_df)} rows)**")
-        st.dataframe(filtered_df, use_container_width=True, height=600)
-
-        output_buffer = BytesIO()
-        filtered_df.to_excel(output_buffer, index=False)
-        output_buffer.seek(0)
-
-        temp_filename = "temp_reconciliation_results.xlsx"
-        with open(temp_filename, "wb") as f:
-            f.write(output_buffer.getvalue())
-        _format_output(temp_filename, filtered_df)
-
-        with open(temp_filename, "rb") as f:
-            excel_data = f.read()
-
-        if st.button("Download Results", key="download_results_btn"):
-            root = tk.Tk()
-            root.withdraw()
-            root.wm_attributes("-topmost", True)
-            save_path = filedialog.asksaveasfilename(
-                defaultextension=".xlsx",
-                filetypes=[("Excel files", "*.xlsx")],
-                initialfile="reconciliation_results.xlsx",
-                title="Save reconciliation results",
-            )
-            root.destroy()
-            if save_path:
-                try:
-                    with open(save_path, "wb") as f:
-                        f.write(excel_data)
-                    st.success(f"Saved to {save_path}")
-                except Exception as exc:
-                    st.error(f"Could not save file: {exc}")
+            if not profiles:
+                st.info("No profiles saved yet.")
+            else:
+                for pname, pcfg in profiles.items():
+                    with st.container():
+                        st.markdown(
+                            f"""<div style="background:{_C['panel']}; border:1px solid {_C['border']};
+                                            border-left:3px solid {_C['green']};
+                                            border-radius:5px; padding:0.75rem 1rem;
+                                            margin-bottom:0.5rem;">
+                                    <span style="font-family:'Titillium Web',sans-serif;
+                                                 font-size:13px; font-weight:600;
+                                                 color:{_C['cool_gray']};">{pname}</span>
+                                    <div style="font-family:'Roboto',sans-serif; font-size:11px;
+                                                color:{_C['text_sec']}; margin-top:4px; line-height:1.6;">
+                                        Match keys (first): {', '.join(pcfg.get('match_keys_first', [])) or '—'}<br>
+                                        Match keys (second): {', '.join(pcfg.get('match_keys_second', [])) or '—'}<br>
+                                        Compare: {pcfg.get('compare_col_first', '—')} / {pcfg.get('compare_col_second', '—')}<br>
+                                        Tolerance: {pcfg.get('tolerance_type', 'None')}
+                                        {f" @ {pcfg.get('tolerance_value')}" if pcfg.get('tolerance_value') else ""}
+                                    </div>
+                                </div>""",
+                            unsafe_allow_html=True,
+                        )
+                        if st.button(f"Delete '{pname}'", key=f"del_{pname}"):
+                            delete_profile(pname)
+                            st.success(f"Profile \u2018{pname}\u2019 deleted.")
+                            st.rerun()
 
 
 if __name__ == "__main__":
